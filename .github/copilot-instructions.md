@@ -14,6 +14,7 @@ Codebreakers is a modular Python cryptographic and cryptanalysis project built o
   `phase-{phase_number}-short-description`
   *Examples:* `phase-0-engineering-baseline`, `phase-1-caesar-cipher`, `phase-2-cli-interface`
 - **Release tags are separate**: the `v0.1`-`v1.0` identifiers in the roadmap are git tags applied at release milestones, not branch names. Do not reuse the `v{n}` form for phase branches.
+- **Checkpoint the roadmap**: Update `TODO.md` in the active phase to check off each item that has been implemented, clarified, or verified, so the task list accurately reflects completed work.
 - Ensure tests, type checking, and linting pass before merging to `main`.
 
 ---
