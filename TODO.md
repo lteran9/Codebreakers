@@ -43,22 +43,22 @@ The domain must not import FastAPI, SQLAlchemy, Azure SDKs, or CLI libraries. Th
 
 ### Build
 
-- [ ] Add `.gitignore` entries for virtual environments, caches, coverage, build artifacts, IDE files, and local environment files.
-- [ ] Add `pre-commit` to the development dependencies and configure hooks for Ruff linting, Ruff formatting, and basic file hygiene.
-- [ ] Enable branch coverage with `pytest-cov`; set an initial achievable threshold and increase it as behavior is added.
-- [ ] Configure pytest unit and integration markers so cloud or container tests can be excluded from the fast local suite.
-- [ ] Add a `Makefile` or platform-neutral task runner with commands for `install`, `format`, `lint`, `typecheck`, and `test`.
-- [ ] Add a GitHub Actions CI workflow for Python 3.12 that installs the package, runs Ruff, runs mypy, and runs pytest with coverage.
-- [ ] Add Dependabot or Renovate configuration for Python and GitHub Actions dependency updates.
-- [ ] Create `docs/architecture/` and record short Architecture Decision Records (ADRs) for the source layout, clean architecture, and initial Azure target.
-- [ ] Record a text-handling ADR fixing the Unicode policy: normalization form (for example NFC), case folding versus preservation, code points versus grapheme clusters, and how digits and non-English symbols in the historical material are treated.
-- [ ] Add `CONTRIBUTING.md` with setup, test, commit, and pull-request guidance.
+- [x] Add `.gitignore` entries for virtual environments, caches, coverage, build artifacts, IDE files, and local environment files.
+- [x] Add `pre-commit` to the development dependencies and configure hooks for Ruff linting, Ruff formatting, and basic file hygiene.
+- [x] Enable branch coverage with `pytest-cov`; set an initial achievable threshold and increase it as behavior is added.
+- [x] Configure pytest unit and integration markers so cloud or container tests can be excluded from the fast local suite.
+- [x] Add a `Makefile` or platform-neutral task runner with commands for `install`, `format`, `lint`, `typecheck`, and `test`.
+- [x] Add a GitHub Actions CI workflow for Python 3.12 that installs the package, runs Ruff, runs mypy, and runs pytest with coverage.
+- [x] Add Dependabot or Renovate configuration for Python and GitHub Actions dependency updates.
+- [x] Create `docs/architecture/` and record short Architecture Decision Records (ADRs) for the source layout, clean architecture, and initial Azure target.
+- [x] Record a text-handling ADR fixing the Unicode policy: normalization form (for example NFC), case folding versus preservation, code points versus grapheme clusters, and how digits and non-English symbols in the historical material are treated.
+- [x] Add `CONTRIBUTING.md` with setup, test, commit, and pull-request guidance.
 
 ### Verify
 
-- [ ] A fresh clone can run all checks using only the documented commands.
-- [ ] CI runs on pull requests and rejects formatting, typing, or test failures.
-- [ ] No production package is introduced without an immediate use case.
+- [x] A fresh clone can run all checks using only the documented commands.
+- [x] CI runs on pull requests and rejects formatting, typing, or test failures.
+- [x] No production package is introduced without an immediate use case.
 
 ## Phase 1: Cipher Domain and Caesar Vertical Slice
 
