@@ -68,33 +68,33 @@ The domain must not import FastAPI, SQLAlchemy, Azure SDKs, or CLI libraries. Th
 
 ### Build
 
-- [ ] Create `src/codebreakers/domain/` with `ciphers/`, `models.py`, and `errors.py`; keep these modules free of framework imports.
-- [ ] Define an immutable request or value object for text, alphabet, case policy, and treatment of symbols outside the alphabet. Keep the key out of this shared object because key types differ per cipher (Caesar `int`, Vigenere `str`, substitution permutation, homophonic one-to-many map).
-- [ ] Define a typed, generic `Cipher[KeyT]` protocol with `encrypt` and `decrypt` operations so each cipher keeps a strictly typed key under `mypy --strict`. Avoid forcing cryptanalysis into this protocol because not every cipher has the same analysis capabilities.
-- [ ] Decide and document whether keys are passed per operation or bound at cipher construction, and capture the choice in an ADR because the Phase 3 cipher registry depends on it (stateless instances versus keyed factories).
-- [ ] Implement an `Alphabet` value object that validates non-empty, unique symbols and provides index lookup and modular rotation.
-- [ ] Implement `CaesarCipher`, including positive, negative, and oversized shifts normalized modulo the alphabet length.
-- [ ] Decide and document whether case is preserved and whether punctuation, whitespace, and unknown symbols pass through or raise validation errors.
-- [ ] Apply a single Unicode normalization step at the domain boundary (per the text-handling ADR) so index lookups cannot break on composed versus decomposed characters.
-- [ ] Export only intentional public types from package `__init__.py` modules.
-- [ ] Add a simple application service in `src/codebreakers/application/` that selects an operation and invokes a supplied cipher without knowing its concrete implementation.
+- [x] Create `src/codebreakers/domain/` with `ciphers/`, `models.py`, and `errors.py`; keep these modules free of framework imports.
+- [x] Define an immutable request or value object for text, alphabet, case policy, and treatment of symbols outside the alphabet. Keep the key out of this shared object because key types differ per cipher (Caesar `int`, Vigenere `str`, substitution permutation, homophonic one-to-many map).
+- [x] Define a typed, generic `Cipher[KeyT]` protocol with `encrypt` and `decrypt` operations so each cipher keeps a strictly typed key under `mypy --strict`. Avoid forcing cryptanalysis into this protocol because not every cipher has the same analysis capabilities.
+- [x] Decide and document whether keys are passed per operation or bound at cipher construction, and capture the choice in an ADR because the Phase 3 cipher registry depends on it (stateless instances versus keyed factories).
+- [x] Implement an `Alphabet` value object that validates non-empty, unique symbols and provides index lookup and modular rotation.
+- [x] Implement `CaesarCipher`, including positive, negative, and oversized shifts normalized modulo the alphabet length.
+- [x] Decide and document whether case is preserved and whether punctuation, whitespace, and unknown symbols pass through or raise validation errors.
+- [x] Apply a single Unicode normalization step at the domain boundary (per the text-handling ADR) so index lookups cannot break on composed versus decomposed characters.
+- [x] Export only intentional public types from package `__init__.py` modules.
+- [x] Add a simple application service in `src/codebreakers/application/` that selects an operation and invokes a supplied cipher without knowing its concrete implementation.
 
 ### Test
 
-- [ ] Add example-based tests using known plaintext and ciphertext pairs.
-- [ ] Add boundary tests for empty text, zero shift, negative shift, full
+- [x] Add example-based tests using known plaintext and ciphertext pairs.
+- [x] Add boundary tests for empty text, zero shift, negative shift, full
   alphabet rotation, Unicode policy, and invalid alphabets.
 - [ ] Add Hypothesis and property tests proving
   `decrypt(encrypt(text, key), key) == normalize(text)` for supported input,
   stating the invariant over normalized input so pass-through or stripping
   policies do not falsify it.
-- [ ] Test application behavior against a small fake cipher to prove the
+- [x] Test application behavior against a small fake cipher to prove the
   application layer depends on the protocol rather than `CaesarCipher`.
 
 ### Exit Criteria
 
-- [ ] The domain has no I/O or framework dependencies.
-- [ ] The Caesar implementation is fully typed and its public behavior is
+- [x] The domain has no I/O or framework dependencies.
+- [x] The Caesar implementation is fully typed and its public behavior is
   documented with examples.
 - [ ] Unit and property tests pass locally and in CI.
 
