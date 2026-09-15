@@ -1,12 +1,8 @@
-"""Codebreakers: A modular Python cryptographic and cryptanalysis package."""
+"""Domain layer for Codebreakers cryptographic operations."""
 
-from codebreakers.application import CipherOperation, CipherRequest, CipherService
-from codebreakers.domain import (
-    Alphabet,
+from codebreakers.domain.ciphers import CaesarCipher
+from codebreakers.domain.errors import (
     AlphabetError,
-    CaesarCipher,
-    CaseStrategy,
-    Cipher,
     CipherKeyError,
     CodebreakersError,
     DomainError,
@@ -14,12 +10,15 @@ from codebreakers.domain import (
     EmptyAlphabetError,
     InvalidKeyError,
     SymbolNotFoundError,
-    TransformOptions,
     UnknownSymbolError,
+)
+from codebreakers.domain.models import (
+    Alphabet,
+    CaseStrategy,
+    TransformOptions,
     UnknownSymbolStrategy,
 )
-
-__version__ = "0.1.0"
+from codebreakers.domain.protocols import Cipher
 
 __all__ = [
     "Alphabet",
@@ -28,9 +27,6 @@ __all__ = [
     "CaseStrategy",
     "Cipher",
     "CipherKeyError",
-    "CipherOperation",
-    "CipherRequest",
-    "CipherService",
     "CodebreakersError",
     "DomainError",
     "DuplicateSymbolError",
@@ -40,5 +36,4 @@ __all__ = [
     "TransformOptions",
     "UnknownSymbolError",
     "UnknownSymbolStrategy",
-    "__version__",
 ]
