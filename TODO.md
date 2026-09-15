@@ -84,7 +84,7 @@ The domain must not import FastAPI, SQLAlchemy, Azure SDKs, or CLI libraries. Th
 - [x] Add example-based tests using known plaintext and ciphertext pairs.
 - [x] Add boundary tests for empty text, zero shift, negative shift, full
   alphabet rotation, Unicode policy, and invalid alphabets.
-- [x] Add Hypothesis and property tests proving
+- [ ] Add Hypothesis and property tests proving
   `decrypt(encrypt(text, key), key) == normalize(text)` for supported input,
   stating the invariant over normalized input so pass-through or stripping
   policies do not falsify it.
