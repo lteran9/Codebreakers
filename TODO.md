@@ -96,7 +96,7 @@ The domain must not import FastAPI, SQLAlchemy, Azure SDKs, or CLI libraries. Th
 - [x] The domain has no I/O or framework dependencies.
 - [x] The Caesar implementation is fully typed and its public behavior is
   documented with examples.
-- [x] Unit and property tests pass locally and in CI.
+- [ ] Unit and property tests pass locally and in CI.
 
 ## Phase 2: Command-Line Product
 
