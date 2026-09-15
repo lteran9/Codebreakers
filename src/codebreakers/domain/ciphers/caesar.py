@@ -31,6 +31,10 @@ class CaesarCipher:
     ) -> str:
         """Decrypt ciphertext by inverting the Caesar shift."""
         opts = options or TransformOptions()
+        if not isinstance(key, int) or isinstance(key, bool):
+            raise InvalidKeyError(
+                f"Caesar cipher key must be an integer, got {type(key).__name__}."
+            )
         return self._transform(ciphertext, shift=-key, options=opts)
 
     def _transform(self, text: str, shift: int, options: TransformOptions) -> str:
