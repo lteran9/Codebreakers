@@ -47,7 +47,7 @@ class Alphabet:
 
     def __contains__(self, symbol: str) -> bool:
         normalized_symbol = unicodedata.normalize("NFC", symbol)
-        return normalized_symbol in self.symbols
+        return len(normalized_symbol) == 1 and normalized_symbol in self.symbols
 
     def index_of(self, symbol: str) -> int:
         """Return the 0-based index of the given symbol in the alphabet."""
