@@ -1,5 +1,6 @@
 """Tests for the Codebreakers CLI using Typer's test runner."""
 
+import re
 import sys
 from unittest.mock import patch
 
@@ -90,8 +91,14 @@ def test_help_text() -> None:
 @pytest.mark.unit
 def test_encrypt_help_shows_example() -> None:
     result = runner.invoke(app, ["encrypt", "--help"])
+
     assert result.exit_code == ExitCode.SUCCESS
-    assert "codebreakers encrypt --cipher caesar --key 3" in result.stdout
+
+    # Typer/Rich may add ANSI escape sequences and wrap long help lines.
+    plain_help = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    normalized_help = re.sub(r"\s+", " ", plain_help)
+
+    assert "codebreakers encrypt --cipher caesar --key 3" in normalized_help
 
 
 @pytest.mark.unit
