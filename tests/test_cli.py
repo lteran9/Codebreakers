@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 import codebreakers.cli.main as cli_main
 from codebreakers.cli.exit_codes import ExitCode
 from codebreakers.cli.main import app, main
+from codebreakers.domain.errors import InvalidKeyError
 
 runner = CliRunner()
 
@@ -136,6 +137,20 @@ def test_invalid_key_type_exit_code() -> None:
         app, ["encrypt", "--cipher", "caesar", "--key", "not-an-int", "--text", "HI"]
     )
     assert result.exit_code == ExitCode.INVALID_USAGE
+
+
+@pytest.mark.unit
+def test_invalid_key_from_service_exit_code() -> None:
+    with patch.object(
+        cli_main._service,
+        "process",
+        side_effect=InvalidKeyError("key must be within supported range"),
+    ):
+        result = runner.invoke(
+            app, ["encrypt", "--cipher", "caesar", "--key", "3", "--text", "HI"]
+        )
+    assert result.exit_code == ExitCode.INVALID_KEY
+    assert "Invalid key: key must be within supported range" in result.output
 
 
 @pytest.mark.unit
