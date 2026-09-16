@@ -139,7 +139,7 @@ def test_invalid_key_type_exit_code() -> None:
 
 
 @pytest.mark.unit
-def test_missing_text_and_no_stdin_reports_invalid_usage() -> None:
+def test_empty_non_tty_stdin_is_accepted() -> None:
     result = runner.invoke(
         app, ["encrypt", "--cipher", "caesar", "--key", "3"], input=""
     )
