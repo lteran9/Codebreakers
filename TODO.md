@@ -106,24 +106,24 @@ The domain must not import FastAPI, SQLAlchemy, Azure SDKs, or CLI libraries. Th
 
 ### Build
 
-- [ ] Add Typer as a production dependency and expose a `codebreakers` console script through `pyproject.toml`.
-- [ ] Create `src/codebreakers/cli/` as an adapter over application services.
-- [ ] Create a single shared composition/wiring module that both the CLI and the later HTTP API import, so there is one source of truth for which ciphers exist and how they are constructed.
-- [ ] Implement `encrypt` and `decrypt` commands with cipher, key, alphabet, and input options.
-- [ ] Support direct text and standard input so commands compose in shell pipelines; write results to standard output and diagnostics to standard error.
-- [ ] Return documented non-zero exit codes for invalid keys, invalid alphabets, unsupported ciphers, and unexpected failures.
-- [ ] Add `--help` examples without leaking stack traces during normal errors.
+- [x] Add Typer as a production dependency and expose a `codebreakers` console script through `pyproject.toml`.
+- [x] Create `src/codebreakers/cli/` as an adapter over application services.
+- [x] Create a single shared composition/wiring module that both the CLI and the later HTTP API import, so there is one source of truth for which ciphers exist and how they are constructed.
+- [x] Implement `encrypt` and `decrypt` commands with cipher, key, alphabet, and input options.
+- [x] Support direct text and standard input so commands compose in shell pipelines; write results to standard output and diagnostics to standard error.
+- [x] Return documented non-zero exit codes for invalid keys, invalid alphabets, unsupported ciphers, and unexpected failures.
+- [x] Add `--help` examples without leaking stack traces during normal errors.
 
 ### Test
 
-- [ ] Test commands with Typer's test runner, including successful output, standard input, help text, and each expected exit code.
-- [ ] Confirm CLI tests use real application services but no database or network.
-- [ ] Package a wheel and verify the console entry point in a clean environment.
+- [x] Test commands with Typer's test runner, including successful output, standard input, help text, and each expected exit code.
+- [x] Confirm CLI tests use real application services but no database or network.
+- [x] Package a wheel and verify the console entry point in a clean environment.
 
 ### Exit Criteria
 
-- [ ] `codebreakers encrypt --cipher caesar ...` and the matching decrypt command form a complete round trip.
-- [ ] The README contains a short installation and CLI usage example.
+- [x] `codebreakers encrypt --cipher caesar ...` and the matching decrypt command form a complete round trip.
+- [x] The README contains a short installation and CLI usage example.
 
 ## Phase 3: Cipher Catalog and Cryptanalysis
 
