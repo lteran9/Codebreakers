@@ -43,6 +43,26 @@ ruff format --check .
 mypy src tests
 ```
 
+## Command-line usage
+
+After installing the package, the `codebreakers` console script is available:
+
+```bash
+# Encrypt with a direct --text argument
+codebreakers encrypt --cipher caesar --key 3 --text "HELLO WORLD"
+# KHOOR ZRUOG
+
+# Decrypt by piping input through standard input
+echo "KHOOR ZRUOG" | codebreakers decrypt --cipher caesar --key 3
+# HELLO WORLD
+
+# Use a custom alphabet
+codebreakers encrypt --cipher caesar --key 2 --text "1239" --alphabet "0123456789"
+# 3451
+```
+
+Run `codebreakers --help`, `codebreakers encrypt --help`, or `codebreakers decrypt --help` for full option details. Exit codes are 0 (success), 1 (unexpected error), 2 (invalid usage), 3 (invalid key), 4 (invalid alphabet), and 5 (unsupported cipher).
+
 The package source lives in `src/codebreakers`, and tests live in `tests`.
 
 ## Architecture notes
