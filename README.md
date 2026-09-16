@@ -61,7 +61,7 @@ codebreakers encrypt --cipher caesar --key 2 --text "1239" --alphabet "012345678
 # 3451
 ```
 
-Run `codebreakers --help`, `codebreakers encrypt --help`, or `codebreakers decrypt --help` for full option details and exit code documentation.
+Run `codebreakers --help`, `codebreakers encrypt --help`, or `codebreakers decrypt --help` for full option details. Exit codes are 0 (success), 1 (unexpected error), 2 (invalid usage), 3 (invalid key), 4 (invalid alphabet), and 5 (unsupported cipher).
 
 The package source lives in `src/codebreakers`, and tests live in `tests`.
 
