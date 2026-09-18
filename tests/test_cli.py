@@ -135,7 +135,7 @@ def test_invalid_key_type_exit_code() -> None:
     result = runner.invoke(
         app, ["encrypt", "--cipher", "caesar", "--key", "not-an-int", "--text", "HI"]
     )
-    assert result.exit_code == ExitCode.INVALID_USAGE
+    assert result.exit_code == ExitCode.INVALID_KEY
 
 
 @pytest.mark.unit

@@ -4,11 +4,7 @@ import sys
 
 import typer
 
-from codebreakers.application.services import (
-    CipherOperation,
-    CipherRequest,
-    CipherService,
-)
+from codebreakers.application.services import CipherOperation
 from codebreakers.cli.exit_codes import ExitCode
 from codebreakers.composition import CIPHER_REGISTRY, get_cipher
 from codebreakers.domain.errors import (
@@ -24,8 +20,6 @@ app = typer.Typer(
     add_completion=False,
 )
 
-_service = CipherService()
-
 
 def _read_text(text: str | None) -> str:
     if text is not None:
@@ -39,7 +33,7 @@ def _read_text(text: str | None) -> str:
 def _run(
     operation: CipherOperation,
     cipher: str,
-    key: int,
+    key: str,
     text: str | None,
     alphabet: str,
 ) -> None:
@@ -59,12 +53,9 @@ def _run(
 
     input_text = _read_text(text)
     selected_cipher = get_cipher(cipher)
-    request = CipherRequest(
-        text=input_text, key=key, operation=operation, options=options
-    )
 
     try:
-        result = _service.process(selected_cipher, request)
+        result = selected_cipher.process(operation, input_text, key, options)
     except CipherKeyError as err:
         typer.echo(f"Invalid key: {err}", err=True)
         raise typer.Exit(code=ExitCode.INVALID_KEY) from err
@@ -78,7 +69,7 @@ def _run(
 @app.command()
 def encrypt(
     cipher: str = typer.Option(..., "--cipher", help="Name of the cipher to use."),
-    key: int = typer.Option(..., "--key", help="Integer shift key for the cipher."),
+    key: str = typer.Option(..., "--key", help="Cipher key value."),
     text: str | None = typer.Option(
         None, "--text", help="Text to encrypt. Reads standard input if omitted."
     ),
@@ -99,7 +90,7 @@ def encrypt(
 @app.command()
 def decrypt(
     cipher: str = typer.Option(..., "--cipher", help="Name of the cipher to use."),
-    key: int = typer.Option(..., "--key", help="Integer shift key for the cipher."),
+    key: str = typer.Option(..., "--key", help="Cipher key value."),
     text: str | None = typer.Option(
         None, "--text", help="Text to decrypt. Reads standard input if omitted."
     ),

@@ -59,9 +59,29 @@ echo "KHOOR ZRUOG" | codebreakers decrypt --cipher caesar --key 3
 # Use a custom alphabet
 codebreakers encrypt --cipher caesar --key 2 --text "1239" --alphabet "0123456789"
 # 3451
+
+# Use Vigenere
+codebreakers encrypt --cipher vigenere --key LEMON --text "ATTACK AT DAWN"
+# LXFOPV EF RNHR
+
+# Use monoalphabetic substitution
+codebreakers encrypt --cipher substitution --key QWERTYUIOPASDFGHJKLZXCVBNM --text "ATTACK"
+# QZZQEA
 ```
 
 Run `codebreakers --help`, `codebreakers encrypt --help`, or `codebreakers decrypt --help` for full option details and exit code documentation.
+
+## Cryptanalysis and benchmarks
+
+Phase 3 adds reusable text statistics, Caesar brute-force ranking, substitution frequency-analysis assistance, Vigenere key-length and candidate ranking, and homophonic token-distribution reports. Analyzer outputs include explicit language or model versions and explainable scores or measurements.
+
+Run the deterministic benchmark script with:
+
+```bash
+python scripts/benchmark_phase3.py
+```
+
+The current quality target is that the Caesar brute-force analyzer places the documented Caesar fixture's key in the top-ranked candidate. Vigenere analysis reports ranked key lengths and candidate keys for sufficiently long ciphertext, but short inputs may not contain enough repeated structure for reliable recovery. Substitution and homophonic analysis are assistance/reporting features in this phase and do not claim to automatically solve arbitrary ciphertext.
 
 The package source lives in `src/codebreakers`, and tests live in `tests`.
 

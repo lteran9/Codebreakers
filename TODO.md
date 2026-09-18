@@ -84,7 +84,7 @@ The domain must not import FastAPI, SQLAlchemy, Azure SDKs, or CLI libraries. Th
 - [x] Add example-based tests using known plaintext and ciphertext pairs.
 - [x] Add boundary tests for empty text, zero shift, negative shift, full
   alphabet rotation, Unicode policy, and invalid alphabets.
-- [ ] Add Hypothesis and property tests proving
+- [x] Add Hypothesis and property tests proving
   `decrypt(encrypt(text, key), key) == normalize(text)` for supported input,
   stating the invariant over normalized input so pass-through or stripping
   policies do not falsify it.
@@ -96,7 +96,7 @@ The domain must not import FastAPI, SQLAlchemy, Azure SDKs, or CLI libraries. Th
 - [x] The domain has no I/O or framework dependencies.
 - [x] The Caesar implementation is fully typed and its public behavior is
   documented with examples.
-- [ ] Unit and property tests pass locally and in CI.
+- [x] Unit and property tests pass locally and in CI.
 
 ## Phase 2: Command-Line Product
 
@@ -133,41 +133,41 @@ The domain must not import FastAPI, SQLAlchemy, Azure SDKs, or CLI libraries. Th
 
 ### Build the Cipher Catalog
 
-- [ ] Implement monoalphabetic substitution with a validated bijective key.
-- [ ] Implement Vigenere as the first polyalphabetic cipher, with a validated repeating keyword and explicit key-advance behavior for non-alphabet symbols.
-- [ ] Implement a homophonic substitution model where plaintext symbols map to one or more unique ciphertext tokens. Encryption is non-deterministic because it selects among homophones, so accept an injected seeded random source to keep it reproducible; decryption stays deterministic.
-- [ ] Create an explicit cipher registry in the shared composition module (the same one the CLI and API import); do not use runtime subclass discovery or import side effects.
-- [ ] Store historical examples and expected results as versioned fixtures with
+- [x] Implement monoalphabetic substitution with a validated bijective key.
+- [x] Implement Vigenere as the first polyalphabetic cipher, with a validated repeating keyword and explicit key-advance behavior for non-alphabet symbols.
+- [x] Implement a homophonic substitution model where plaintext symbols map to one or more unique ciphertext tokens. Encryption is non-deterministic because it selects among homophones, so accept an injected seeded random source to keep it reproducible; decryption stays deterministic.
+- [x] Create an explicit cipher registry in the shared composition module (the same one the CLI and API import); do not use runtime subclass discovery or import side effects.
+- [x] Store historical examples and expected results as versioned fixtures with
   provenance and licensing notes.
 
 ### Build Cryptanalysis Capabilities
 
-- [ ] Create a separate `domain/cryptanalysis/` package with typed `Analyzer`
+- [x] Create a separate `domain/cryptanalysis/` package with typed `Analyzer`
   protocols and ranked candidate result models.
-- [ ] Add reusable text statistics: symbol counts, n-gram counts, index of coincidence, and configurable language scoring.
-- [ ] Implement Caesar brute-force analysis that returns every shift ranked by an English-language score.
-- [ ] Implement frequency-analysis assistance for substitution ciphers before attempting a fully automated solver.
-- [ ] Implement Vigenere key-length estimation using index of coincidence or Kasiski examination, then rank candidate keys.
-- [ ] Treat automated homophonic solving as an optional advanced milestone;
+- [x] Add reusable text statistics: symbol counts, n-gram counts, index of coincidence, and configurable language scoring.
+- [x] Implement Caesar brute-force analysis that returns every shift ranked by an English-language score.
+- [x] Implement frequency-analysis assistance for substitution ciphers before attempting a fully automated solver.
+- [x] Implement Vigenere key-length estimation using index of coincidence or Kasiski examination, then rank candidate keys.
+- [x] Treat automated homophonic solving as an optional advanced milestone;
   first provide frequency and symbol-distribution reports.
-- [ ] Version language models or frequency data and make the selected language
+- [x] Version language models or frequency data and make the selected language
   explicit in analysis requests.
 
 ### Test and Benchmark
 
-- [ ] Add unit and property tests for every cipher's round-trip invariant over
+- [x] Add unit and property tests for every cipher's round-trip invariant over
   normalized input, seeding the random source for homophonic encryption.
-- [ ] Add tests for malformed, duplicate, incomplete, and ambiguous keys.
-- [ ] Create a corpus of known examples that tests solver ranking quality.
-- [ ] Add deterministic benchmark scripts for increasing ciphertext sizes;
+- [x] Add tests for malformed, duplicate, incomplete, and ambiguous keys.
+- [x] Create a corpus of known examples that tests solver ranking quality.
+- [x] Add deterministic benchmark scripts for increasing ciphertext sizes;
   record input size, runtime, Python version, and machine details.
-- [ ] Set documented quality targets, such as placing the correct Caesar key in the top candidate and recovering known Vigenere keys for sufficient text.
+- [x] Set documented quality targets, such as placing the correct Caesar key in the top candidate and recovering known Vigenere keys for sufficient text.
 
 ### Exit Criteria
 
-- [ ] New cipher implementations require no changes to existing cipher classes.
-- [ ] Decryption is deterministic for every cipher, and encryption is deterministic except for homophonic substitution, which is intentionally non-deterministic yet reproducible under a fixed seed. Analyzers return explainable scores and ranked candidates.
-- [ ] Algorithm limitations and minimum useful ciphertext lengths are documented.
+- [x] New cipher implementations require no changes to existing cipher classes.
+- [x] Decryption is deterministic for every cipher, and encryption is deterministic except for homophonic substitution, which is intentionally non-deterministic yet reproducible under a fixed seed. Analyzers return explainable scores and ranked candidates.
+- [x] Algorithm limitations and minimum useful ciphertext lengths are documented.
 
 ## Phase 4: HTTP API
 

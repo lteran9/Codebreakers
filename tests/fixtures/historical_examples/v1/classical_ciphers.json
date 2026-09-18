@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "id": "caesar-public-domain-example-001",
+      "cipher": "caesar",
+      "key": "3",
+      "plaintext": "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG",
+      "ciphertext": "WKH TXLFN EURZQ IRA MXPSV RYHU WKH ODCB GRJ",
+      "provenance": "Constructed pangram example used as a deterministic regression fixture; not copied from a restricted source.",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "vigenere-public-domain-example-001",
+      "cipher": "vigenere",
+      "key": "LEMON",
+      "plaintext": "ATTACK AT DAWN",
+      "ciphertext": "LXFOPV EF RNHR",
+      "provenance": "Common educational Vigenere example recorded as a deterministic regression fixture.",
+      "license": "Public domain"
+    }
+  ]
+}
