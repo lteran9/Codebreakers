@@ -19,6 +19,7 @@ codebreakers = "codebreakers.cli.main:main"
 
 [project.optional-dependencies]
 dev = [
+    "hypothesis>=6.110",
     "mypy>=1.11",
     "pre-commit>=4.0",
     "pytest>=8.3",

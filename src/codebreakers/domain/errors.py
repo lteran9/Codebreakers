@@ -33,5 +33,25 @@ class InvalidKeyError(CipherKeyError):
     """Raised when a cipher key is malformed or invalid for the target cipher."""
 
 
+class DuplicateKeyMappingError(CipherKeyError):
+    """Raised when a cipher key maps multiple inputs to the same output."""
+
+
+class IncompleteKeyError(CipherKeyError):
+    """Raised when a cipher key does not cover every required alphabet symbol."""
+
+
+class AmbiguousKeyError(CipherKeyError):
+    """Raised when a cipher key cannot be inverted deterministically."""
+
+
 class UnknownSymbolError(DomainError):
     """Raised when a text contains symbols outside the alphabet under strict policy."""
+
+
+class AnalysisError(DomainError):
+    """Base exception for cryptanalysis errors."""
+
+
+class InsufficientTextError(AnalysisError):
+    """Raised when input text is too short for a requested analysis."""

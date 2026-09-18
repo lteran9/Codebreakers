@@ -39,7 +39,7 @@ def _read_text(text: str | None) -> str:
 def _run(
     operation: CipherOperation,
     cipher: str,
-    key: int,
+    key: str,
     text: str | None,
     alphabet: str,
 ) -> None:
@@ -59,12 +59,18 @@ def _run(
 
     input_text = _read_text(text)
     selected_cipher = get_cipher(cipher)
-    request = CipherRequest(
-        text=input_text, key=key, operation=operation, options=options
-    )
 
     try:
-        result = _service.process(selected_cipher, request)
+        parsed_key = selected_cipher.parse_key(key, options)
+        result = _service.process(
+            selected_cipher.cipher,
+            CipherRequest(
+                text=input_text,
+                key=parsed_key,
+                operation=operation,
+                options=options,
+            ),
+        )
     except CipherKeyError as err:
         typer.echo(f"Invalid key: {err}", err=True)
         raise typer.Exit(code=ExitCode.INVALID_KEY) from err
@@ -78,7 +84,7 @@ def _run(
 @app.command()
 def encrypt(
     cipher: str = typer.Option(..., "--cipher", help="Name of the cipher to use."),
-    key: int = typer.Option(..., "--key", help="Integer shift key for the cipher."),
+    key: str = typer.Option(..., "--key", help="Cipher key value."),
     text: str | None = typer.Option(
         None, "--text", help="Text to encrypt. Reads standard input if omitted."
     ),
@@ -99,7 +105,7 @@ def encrypt(
 @app.command()
 def decrypt(
     cipher: str = typer.Option(..., "--cipher", help="Name of the cipher to use."),
-    key: int = typer.Option(..., "--key", help="Integer shift key for the cipher."),
+    key: str = typer.Option(..., "--key", help="Cipher key value."),
     text: str | None = typer.Option(
         None, "--text", help="Text to decrypt. Reads standard input if omitted."
     ),
