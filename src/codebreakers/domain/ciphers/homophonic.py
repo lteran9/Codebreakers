@@ -40,9 +40,13 @@ class HomophonicKey:
                 raise InvalidKeyError(
                     "Homophonic key source symbols must be in alphabet."
                 )
-            if not normalized_targets or any(not token for token in normalized_targets):
-                raise InvalidKeyError(
-                    "Homophonic key mappings must contain non-empty tokens."
+            if (
+                not normalized_targets
+                or any(
+                    not token or any(character.isspace() for character in token)
+                    for token in normalized_targets
+                )
+            ):
                 )
             normalized_items.append((normalized_source, normalized_targets))
             all_tokens.extend(normalized_targets)
