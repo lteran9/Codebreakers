@@ -38,7 +38,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> object:
     """Lazily resolve public package exports to avoid eager import cycles."""
     if name in {"CipherOperation", "CipherRequest", "CipherService"}:
         from codebreakers.application import (

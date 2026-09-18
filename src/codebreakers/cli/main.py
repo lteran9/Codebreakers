@@ -4,7 +4,11 @@ import sys
 
 import typer
 
-from codebreakers.application.services import CipherOperation
+from codebreakers.application.services import (
+    CipherOperation,
+    CipherRequest,
+    CipherService,
+)
 from codebreakers.cli.exit_codes import ExitCode
 from codebreakers.composition import CIPHER_REGISTRY, get_cipher
 from codebreakers.domain.errors import (
@@ -19,6 +23,8 @@ app = typer.Typer(
     help="Encrypt and decrypt text using classical ciphers.",
     add_completion=False,
 )
+
+_service = CipherService()
 
 
 def _read_text(text: str | None) -> str:
@@ -55,7 +61,16 @@ def _run(
     selected_cipher = get_cipher(cipher)
 
     try:
-        result = selected_cipher.process(operation, input_text, key, options)
+        parsed_key = selected_cipher.parse_key(key, options)
+        result = _service.process(
+            selected_cipher.cipher,
+            CipherRequest(
+                text=input_text,
+                key=parsed_key,
+                operation=operation,
+                options=options,
+            ),
+        )
     except CipherKeyError as err:
         typer.echo(f"Invalid key: {err}", err=True)
         raise typer.Exit(code=ExitCode.INVALID_KEY) from err

@@ -9,7 +9,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> object:
     """Lazily expose application-layer API without eager imports."""
     if name in {"CipherOperation", "CipherRequest", "CipherService"}:
         from codebreakers.application.services import (

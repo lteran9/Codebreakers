@@ -32,7 +32,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> object:
     """Lazily expose domain-layer API without eager imports."""
     if name in {
         "Alphabet",

@@ -3,7 +3,7 @@
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol, cast
 
 from codebreakers.application.services import (
     CipherOperation,
@@ -25,15 +25,10 @@ from codebreakers.domain.protocols import Cipher
 class CipherSpecProtocol(Protocol):
     """Registry entry that can execute a cipher from a raw string key."""
 
-    @property
-    def name(self) -> str:
-        """Registered cipher name."""
-        ...
-
-    @property
-    def key_help(self) -> str:
-        """Human-readable key format help."""
-        ...
+    name: str
+    cipher: Cipher[Any]
+    parse_key: Callable[[str, TransformOptions], Any]
+    key_help: str
 
     def process(
         self,
@@ -105,32 +100,37 @@ def _parse_homophonic_key(raw_key: str, options: TransformOptions) -> Homophonic
     return HomophonicKey.from_mapping(options.alphabet, mapping)
 
 
-CIPHER_REGISTRY: Mapping[str, CipherSpecProtocol] = {
-    "caesar": CipherSpec(
-        name="caesar",
-        cipher=CaesarCipher(),
-        parse_key=_parse_caesar_key,
-        key_help="integer shift, for example 3",
-    ),
-    "substitution": CipherSpec(
-        name="substitution",
-        cipher=SubstitutionCipher(),
-        parse_key=_parse_substitution_key,
-        key_help="cipher alphabet permutation, for example QWERTYUIOPASDFGHJKLZXCVBNM",
-    ),
-    "vigenere": CipherSpec(
-        name="vigenere",
-        cipher=VigenereCipher(),
-        parse_key=_parse_vigenere_key,
-        key_help="alphabet keyword, for example LEMON",
-    ),
-    "homophonic": CipherSpec(
-        name="homophonic",
-        cipher=HomophonicSubstitutionCipher(),
-        parse_key=_parse_homophonic_key,
-        key_help='JSON mapping, for example {"A":["11"],"B":["21"]}',
-    ),
-}
+CIPHER_REGISTRY: Mapping[str, CipherSpecProtocol] = cast(
+    Mapping[str, CipherSpecProtocol],
+    {
+        "caesar": CipherSpec(
+            name="caesar",
+            cipher=CaesarCipher(),
+            parse_key=_parse_caesar_key,
+            key_help="integer shift, for example 3",
+        ),
+        "substitution": CipherSpec(
+            name="substitution",
+            cipher=SubstitutionCipher(),
+            parse_key=_parse_substitution_key,
+            key_help=(
+                "cipher alphabet permutation, for example QWERTYUIOPASDFGHJKLZXCVBNM"
+            ),
+        ),
+        "vigenere": CipherSpec(
+            name="vigenere",
+            cipher=VigenereCipher(),
+            parse_key=_parse_vigenere_key,
+            key_help="alphabet keyword, for example LEMON",
+        ),
+        "homophonic": CipherSpec(
+            name="homophonic",
+            cipher=HomophonicSubstitutionCipher(),
+            parse_key=_parse_homophonic_key,
+            key_help='JSON mapping, for example {"A":["11"],"B":["21"]}',
+        ),
+    },
+)
 
 
 def get_cipher(name: str) -> CipherSpecProtocol:
