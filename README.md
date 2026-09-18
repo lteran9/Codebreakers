@@ -78,7 +78,7 @@ Phase 3 adds reusable text statistics, Caesar brute-force ranking, substitution 
 Run the deterministic benchmark script with:
 
 ```bash
-python scripts/benchmark_phase3.py
+python scripts/benchmark_caesar.py
 ```
 
 The current quality target is that the Caesar brute-force analyzer places the documented Caesar fixture's key in the top-ranked candidate. Vigenere analysis reports ranked key lengths and candidate keys for sufficiently long ciphertext, but short inputs may not contain enough repeated structure for reliable recovery. Substitution and homophonic analysis are assistance/reporting features in this phase and do not claim to automatically solve arbitrary ciphertext.
