@@ -157,10 +157,16 @@ class VigenereAnalyzer:
 
     def analyze(self, text: str) -> VigenereAnalysisResult:
         """Return ranked key lengths and coarse candidate keys."""
-        normalized = normalize_text(text).upper()
-        supported = "".join(
-            symbol for symbol in normalized if symbol in self._options.alphabet
-        )
+        normalized = normalize_text(text)
+        supported_symbols: list[str] = []
+        for symbol in normalized:
+            if symbol in self._options.alphabet:
+                supported_symbols.append(symbol)
+            elif symbol.upper() in self._options.alphabet:
+                supported_symbols.append(symbol.upper())
+            elif symbol.lower() in self._options.alphabet:
+                supported_symbols.append(symbol.lower())
+        supported = "".join(supported_symbols)
         if len(supported) < 12:
             raise InsufficientTextError(
                 "Vigenere analysis requires at least 12 supported ciphertext symbols."
