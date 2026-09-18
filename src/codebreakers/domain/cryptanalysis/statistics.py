@@ -43,8 +43,16 @@ ENGLISH_LANGUAGE_MODEL = LanguageModel(
 
 
 def _supported_symbols(text: str, alphabet: Alphabet) -> str:
-    normalized = normalize_text(text).upper()
-    return "".join(symbol for symbol in normalized if symbol in alphabet)
+    normalized = normalize_text(text)
+    supported: list[str] = []
+    for symbol in normalized:
+        if symbol in alphabet:
+            supported.append(symbol)
+        elif symbol.upper() in alphabet:
+            supported.append(symbol.upper())
+        elif symbol.lower() in alphabet:
+            supported.append(symbol.lower())
+    return "".join(supported)
 
 
 def symbol_counts(text: str, alphabet: Alphabet | None = None) -> dict[str, int]:
