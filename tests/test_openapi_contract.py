@@ -13,9 +13,9 @@ HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 
 @pytest.mark.unit
 def test_committed_openapi_matches_generated() -> None:
-    assert (
-        OPENAPI_PATH.read_text(encoding="utf-8") == render_openapi_document()
-    ), "The OpenAPI contract changed. Review the diff, then run `make openapi`."
+    committed = OPENAPI_PATH.read_text(encoding="utf-8")
+    hint = "The OpenAPI contract changed. Review the diff, then run `make openapi`."
+    assert committed == render_openapi_document(), hint
 
 
 @pytest.mark.unit
