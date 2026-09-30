@@ -22,7 +22,7 @@ codebreakers = "codebreakers.cli.main:main"
 
 [project.optional-dependencies]
 dev = [
-    "httpx2>=2.13",
+    "httpx>=0.27",
     "hypothesis>=6.110",
     "mypy>=1.11",
     "pre-commit>=4.0",
