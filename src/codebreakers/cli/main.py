@@ -1,22 +1,27 @@
 """Typer application exposing cipher operations as a command-line tool."""
 
+import json
+import logging
+import math
 import sys
+from dataclasses import asdict
 
 import typer
 
-from codebreakers.application.services import (
-    CipherOperation,
-    CipherRequest,
-    CipherService,
+from codebreakers.application.errors import (
+    UnsupportedAnalyzerError,
+    UnsupportedCipherError,
+    UnsupportedLanguageError,
 )
+from codebreakers.application.services import CipherOperation
 from codebreakers.cli.exit_codes import ExitCode
-from codebreakers.composition import CIPHER_REGISTRY, get_cipher
+from codebreakers.composition import create_analysis_service, run_cipher
 from codebreakers.domain.errors import (
     AlphabetError,
+    AnalysisError,
     CipherKeyError,
     UnknownSymbolError,
 )
-from codebreakers.domain.models import Alphabet, TransformOptions
 
 app = typer.Typer(
     name="codebreakers",
@@ -24,7 +29,7 @@ app = typer.Typer(
     add_completion=False,
 )
 
-_service = CipherService()
+_analysis_service = create_analysis_service()
 
 
 def _read_text(text: str | None) -> str:
@@ -36,6 +41,11 @@ def _read_text(text: str | None) -> str:
     return sys.stdin.read().rstrip("\n")
 
 
+def _fail(message: str, code: ExitCode) -> typer.Exit:
+    typer.echo(message, err=True)
+    return typer.Exit(code=code)
+
+
 def _run(
     operation: CipherOperation,
     cipher: str,
@@ -43,40 +53,17 @@ def _run(
     text: str | None,
     alphabet: str,
 ) -> None:
-    if cipher not in CIPHER_REGISTRY:
-        supported = ", ".join(sorted(CIPHER_REGISTRY))
-        typer.echo(
-            f"Unsupported cipher '{cipher}'. Supported ciphers: {supported}.",
-            err=True,
-        )
-        raise typer.Exit(code=ExitCode.UNSUPPORTED_CIPHER)
-
-    try:
-        options = TransformOptions(alphabet=Alphabet(alphabet))
-    except AlphabetError as err:
-        typer.echo(f"Invalid alphabet: {err}", err=True)
-        raise typer.Exit(code=ExitCode.INVALID_ALPHABET) from err
-
     input_text = _read_text(text)
-    selected_cipher = get_cipher(cipher)
-
     try:
-        parsed_key = selected_cipher.parse_key(key, options)
-        result = _service.process(
-            selected_cipher.cipher,
-            CipherRequest(
-                text=input_text,
-                key=parsed_key,
-                operation=operation,
-                options=options,
-            ),
-        )
+        result = run_cipher(cipher, operation, input_text, key, alphabet)
+    except UnsupportedCipherError as err:
+        raise _fail(str(err), ExitCode.UNSUPPORTED_CIPHER) from err
+    except AlphabetError as err:
+        raise _fail(f"Invalid alphabet: {err}", ExitCode.INVALID_ALPHABET) from err
     except CipherKeyError as err:
-        typer.echo(f"Invalid key: {err}", err=True)
-        raise typer.Exit(code=ExitCode.INVALID_KEY) from err
+        raise _fail(f"Invalid key: {err}", ExitCode.INVALID_KEY) from err
     except UnknownSymbolError as err:
-        typer.echo(f"Invalid input: {err}", err=True)
-        raise typer.Exit(code=ExitCode.INVALID_USAGE) from err
+        raise _fail(f"Invalid input: {err}", ExitCode.INVALID_USAGE) from err
 
     typer.echo(result)
 
@@ -121,6 +108,77 @@ def decrypt(
         codebreakers decrypt --cipher caesar --key 3 --text "KHOOR"
     """
     _run(CipherOperation.DECRYPT, cipher, key, text, alphabet)
+
+
+def _finite_or_none(value: object) -> object:
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _finite_or_none(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_finite_or_none(item) for item in value]
+    return value
+
+
+@app.command()
+def analyze(
+    analyzer: str = typer.Option(
+        ...,
+        "--analyzer",
+        help=(
+            "Analyzer to run: caesar-bruteforce, substitution-frequency, "
+            "vigenere-frequency, or homophonic-distribution."
+        ),
+    ),
+    text: str | None = typer.Option(
+        None, "--text", help="Ciphertext to analyze. Reads standard input if omitted."
+    ),
+    language: str = typer.Option(
+        "english", "--language", help="Language model used for scoring."
+    ),
+) -> None:
+    """Analyze ciphertext without a key and print a JSON report.
+
+    Example:
+        codebreakers analyze --analyzer caesar-bruteforce --text "KHOOR ZRUOG"
+    """
+    input_text = _read_text(text)
+    try:
+        outcome = _analysis_service.analyze(analyzer, input_text, language)
+    except UnsupportedAnalyzerError as err:
+        raise _fail(str(err), ExitCode.UNSUPPORTED_ANALYZER) from err
+    except UnsupportedLanguageError as err:
+        raise _fail(str(err), ExitCode.INVALID_USAGE) from err
+    except AnalysisError as err:
+        raise _fail(f"Analysis failed: {err}", ExitCode.INSUFFICIENT_TEXT) from err
+
+    # Non-finite scores become null so the output is always valid JSON.
+    report = _finite_or_none(asdict(outcome))
+    typer.echo(json.dumps(report, indent=2, ensure_ascii=False))
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind."),
+    port: int = typer.Option(8000, "--port", min=1, max=65535, help="Port to bind."),
+) -> None:
+    """Run the HTTP API with Uvicorn.
+
+    Example:
+        codebreakers serve --port 8000
+    """
+    import uvicorn  # deferred so cipher commands do not load the server stack
+
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+    )
+    uvicorn.run(
+        "codebreakers.api:create_app",
+        factory=True,
+        host=host,
+        port=port,
+        server_header=False,
+    )
 
 
 def main() -> None:

@@ -178,28 +178,28 @@ versioned, documented HTTP interface.
 
 ### Build
 
-- [ ] Add FastAPI, Pydantic, and an ASGI server as production dependencies.
-- [ ] Create `src/codebreakers/api/` with an application factory, versioned routers under `/v1`, schemas, dependency providers, and exception handlers.
-- [ ] Implement `POST /v1/ciphers/{cipher}/encrypt` and `/decrypt`.
-- [ ] Implement `POST /v1/analyses`; initially run small analyses synchronously but shape the response around a job resource for later queueing.
-- [ ] Implement `GET /health/live` for process health and `GET /health/ready` for dependency readiness.
-- [ ] Apply request-size limits, strict schema validation, and redaction rules so plaintext, ciphertext, and keys do not appear in routine logs.
-- [ ] Generate stable OpenAPI operation IDs and include request/response examples.
-- [ ] Define consistent problem responses with machine-readable error codes and
+- [x] Add FastAPI, Pydantic, and an ASGI server as production dependencies.
+- [x] Create `src/codebreakers/api/` with an application factory, versioned routers under `/v1`, schemas, dependency providers, and exception handlers.
+- [x] Implement `POST /v1/ciphers/{cipher}/encrypt` and `/decrypt`.
+- [x] Implement `POST /v1/analyses`; initially run small analyses synchronously but shape the response around a job resource for later queueing.
+- [x] Implement `GET /health/live` for process health and `GET /health/ready` for dependency readiness.
+- [x] Apply request-size limits, strict schema validation, and redaction rules so plaintext, ciphertext, and keys do not appear in routine logs.
+- [x] Generate stable OpenAPI operation IDs and include request/response examples.
+- [x] Define consistent problem responses with machine-readable error codes and
   correlation IDs.
 
 ### Test
 
-- [ ] Add API contract tests with FastAPI's test client for success, validation, unsupported ciphers, payload limits, and error serialization.
-- [ ] Verify domain exceptions map to intentional 4xx responses and unexpected failures map to sanitized 5xx responses.
-- [ ] Save and review the generated OpenAPI document for accidental contract
+- [x] Add API contract tests with FastAPI's test client for success, validation, unsupported ciphers, payload limits, and error serialization.
+- [x] Verify domain exceptions map to intentional 4xx responses and unexpected failures map to sanitized 5xx responses.
+- [x] Save and review the generated OpenAPI document for accidental contract
   changes; add snapshot checking only if maintenance remains practical.
 
 ### Exit Criteria
 
-- [ ] OpenAPI documentation describes every public endpoint and schema.
-- [ ] Route handlers only translate HTTP data and call application services.
-- [ ] The CLI and API exercise the same application and domain behavior.
+- [x] OpenAPI documentation describes every public endpoint and schema.
+- [x] Route handlers only translate HTTP data and call application services.
+- [x] The CLI and API exercise the same application and domain behavior.
 
 ## Phase 5: PostgreSQL Persistence
 
