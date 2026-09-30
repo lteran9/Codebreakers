@@ -69,7 +69,48 @@ codebreakers encrypt --cipher substitution --key QWERTYUIOPASDFGHJKLZXCVBNM --te
 # QZZQEA
 ```
 
-Run `codebreakers --help`, `codebreakers encrypt --help`, or `codebreakers decrypt --help` for full option details. Exit codes are 0 (success), 1 (unexpected error), 2 (invalid usage), 3 (invalid key), 4 (invalid alphabet), and 5 (unsupported cipher).
+Run `codebreakers --help`, `codebreakers encrypt --help`, or `codebreakers decrypt --help` for full option details.
+
+Analyze ciphertext without a key; the report is printed as JSON:
+
+```bash
+codebreakers analyze --analyzer caesar-bruteforce \
+  --text "WKH TXLFN EURZQ IRA MXPSV RYHU WKH ODCB GRJ"
+```
+
+Analyzers: `caesar-bruteforce`, `substitution-frequency`, `vigenere-frequency`, `homophonic-distribution`. Exit codes are 0 (success), 1 (unexpected error), 2 (invalid usage or unsupported language), 3 (invalid key), 4 (invalid alphabet), 5 (unsupported cipher), 6 (unsupported analyzer), and 7 (insufficient text for analysis).
+
+## HTTP API
+
+Start the API locally (binds to `127.0.0.1:8000` by default), then open `http://127.0.0.1:8000/docs` for interactive OpenAPI documentation:
+
+```bash
+codebreakers serve
+```
+
+```bash
+# Encrypt and decrypt
+curl -s -X POST http://127.0.0.1:8000/v1/ciphers/caesar/encrypt \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "HELLO WORLD", "key": "3"}'
+# {"cipher":"caesar","operation":"encrypt","result":"KHOOR ZRUOG"}
+
+# Submit an analysis (returns 201 with a Location header), then fetch it
+curl -s -i -X POST http://127.0.0.1:8000/v1/analyses \
+  -H 'Content-Type: application/json' \
+  -d '{"analyzer": "caesar-bruteforce", "text": "WKH TXLFN EURZQ IRA MXPSV RYHU WKH ODCB GRJ"}'
+curl -s http://127.0.0.1:8000/v1/analyses/<id>
+
+# Probes
+curl -s http://127.0.0.1:8000/health/live
+curl -s http://127.0.0.1:8000/health/ready
+```
+
+Errors are RFC 9457 `application/problem+json` bodies with a machine-readable `code` and a `correlation_id` that matches the `X-Request-ID` response header. Request bodies are limited to 64 KiB, text to 20,000 characters, and keys to 4,096 characters. Analysis jobs are held in memory until persistence arrives, so they do not survive a restart. See [ADR-0007](docs/architecture/ADR-0007-http-api-contract.md) for the full contract.
+
+The committed contract lives in [docs/api/openapi.json](docs/api/openapi.json). A test fails when the generated schema drifts; review the change and regenerate with `make openapi`.
+
+These are broken classical ciphers. They provide no confidentiality and must never be used to protect real secrets.
 
 ## Cryptanalysis and benchmarks
 

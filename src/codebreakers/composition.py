@@ -5,6 +5,12 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
+from codebreakers.application.analysis import (
+    AnalysisRepository,
+    AnalysisService,
+    AnalyzerFactory,
+)
+from codebreakers.application.errors import UnsupportedCipherError
 from codebreakers.application.services import (
     CipherOperation,
     CipherRequest,
@@ -17,9 +23,18 @@ from codebreakers.domain.ciphers.homophonic import (
 )
 from codebreakers.domain.ciphers.substitution import SubstitutionCipher, SubstitutionKey
 from codebreakers.domain.ciphers.vigenere import VigenereCipher, VigenereKey
+from codebreakers.domain.cryptanalysis.analyzers import (
+    CaesarBruteForceAnalyzer,
+    HomophonicDistributionAnalyzer,
+    SubstitutionFrequencyAnalyzer,
+    VigenereAnalyzer,
+)
+from codebreakers.domain.cryptanalysis.models import LanguageModel
+from codebreakers.domain.cryptanalysis.statistics import ENGLISH_LANGUAGE_MODEL
 from codebreakers.domain.errors import InvalidKeyError
-from codebreakers.domain.models import TransformOptions
+from codebreakers.domain.models import Alphabet, TransformOptions
 from codebreakers.domain.protocols import Cipher
+from codebreakers.infrastructure.persistence.memory import InMemoryAnalysisRepository
 
 
 class CipherSpecProtocol(Protocol):
@@ -136,3 +151,43 @@ CIPHER_REGISTRY: Mapping[str, CipherSpecProtocol] = cast(
 def get_cipher(name: str) -> CipherSpecProtocol:
     """Look up a registered cipher by name."""
     return CIPHER_REGISTRY[name]
+
+
+def run_cipher(
+    cipher: str,
+    operation: CipherOperation,
+    text: str,
+    raw_key: str,
+    alphabet: str,
+) -> str:
+    """Resolve a cipher by name and run an operation; shared by CLI and API."""
+    spec = CIPHER_REGISTRY.get(cipher)
+    if spec is None:
+        raise UnsupportedCipherError(cipher, CIPHER_REGISTRY)
+    options = TransformOptions(alphabet=Alphabet(alphabet))
+    return spec.process(operation, text, raw_key, options)
+
+
+LANGUAGE_MODELS: Mapping[str, LanguageModel] = {
+    ENGLISH_LANGUAGE_MODEL.name: ENGLISH_LANGUAGE_MODEL,
+}
+
+ANALYZER_REGISTRY: Mapping[str, AnalyzerFactory] = {
+    "caesar-bruteforce": lambda model: CaesarBruteForceAnalyzer(language_model=model),
+    "substitution-frequency": lambda model: SubstitutionFrequencyAnalyzer(
+        language_model=model
+    ),
+    "vigenere-frequency": lambda model: VigenereAnalyzer(language_model=model),
+    "homophonic-distribution": lambda _model: HomophonicDistributionAnalyzer(),
+}
+
+
+def create_analysis_service(
+    repository: AnalysisRepository | None = None,
+) -> AnalysisService:
+    """Build the analysis service over the registered analyzers."""
+    return AnalysisService(
+        analyzers=ANALYZER_REGISTRY,
+        languages=LANGUAGE_MODELS,
+        repository=repository or InMemoryAnalysisRepository(),
+    )

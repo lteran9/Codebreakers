@@ -1,5 +1,6 @@
 """Tests for the Codebreakers CLI using Typer's test runner."""
 
+import json
 import re
 import sys
 from unittest.mock import patch
@@ -142,8 +143,8 @@ def test_invalid_key_type_exit_code() -> None:
 @pytest.mark.unit
 def test_invalid_key_from_service_exit_code() -> None:
     with patch.object(
-        cli_main._service,
-        "process",
+        cli_main,
+        "run_cipher",
         side_effect=InvalidKeyError("key must be within supported range"),
     ):
         result = runner.invoke(
@@ -202,3 +203,75 @@ def test_main_reports_unexpected_error_without_traceback() -> None:
     ):
         main()
     assert exc_info.value.exit_code == ExitCode.UNEXPECTED_ERROR
+
+
+CAESAR_CIPHERTEXT = (
+    "WKH TXLFN EURZQ IRA MXPSV RYHU WKH ODCB GRJ DQG NHHSV UXQQLQJ WKURXJK WKH ILHOG"
+)
+
+
+@pytest.mark.unit
+def test_analyze_prints_ranked_json() -> None:
+    result = runner.invoke(
+        app,
+        ["analyze", "--analyzer", "caesar-bruteforce", "--text", CAESAR_CIPHERTEXT],
+    )
+    assert result.exit_code == ExitCode.SUCCESS
+    report = json.loads(result.stdout)
+    assert report["analyzer"] == "caesar-bruteforce"
+    assert report["candidates"][0]["key"] == "3"
+
+
+@pytest.mark.unit
+def test_analyze_reads_standard_input() -> None:
+    result = runner.invoke(
+        app,
+        ["analyze", "--analyzer", "homophonic-distribution"],
+        input="11 21 11\n",
+    )
+    assert result.exit_code == ExitCode.SUCCESS
+    assert json.loads(result.stdout)["symbol_counts"] == {"11": 2, "21": 1}
+
+
+@pytest.mark.unit
+def test_analyze_emits_null_for_non_finite_scores() -> None:
+    result = runner.invoke(
+        app, ["analyze", "--analyzer", "caesar-bruteforce", "--text", "123"]
+    )
+    assert result.exit_code == ExitCode.SUCCESS
+    assert json.loads(result.stdout)["candidates"][0]["score"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("args", "exit_code"),
+    [
+        (["--analyzer", "enigma", "--text", "ABC"], ExitCode.UNSUPPORTED_ANALYZER),
+        (
+            ["--analyzer", "caesar-bruteforce", "--text", "A", "--language", "xx"],
+            ExitCode.INVALID_USAGE,
+        ),
+        (
+            ["--analyzer", "vigenere-frequency", "--text", "SHORT"],
+            ExitCode.INSUFFICIENT_TEXT,
+        ),
+    ],
+)
+def test_analyze_error_exit_codes(args: list[str], exit_code: ExitCode) -> None:
+    result = runner.invoke(app, ["analyze", *args])
+    assert result.exit_code == exit_code
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.unit
+def test_serve_runs_uvicorn_factory_on_loopback() -> None:
+    with patch("uvicorn.run") as run:
+        result = runner.invoke(app, ["serve", "--port", "9000"])
+    assert result.exit_code == ExitCode.SUCCESS
+    run.assert_called_once_with(
+        "codebreakers.api:create_app",
+        factory=True,
+        host="127.0.0.1",
+        port=9000,
+        server_header=False,
+    )
