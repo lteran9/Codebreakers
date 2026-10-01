@@ -40,6 +40,8 @@ from codebreakers.domain.cryptanalysis.models import (
     FrequencyAnalysisReport,
 )
 
+_NONFINITE_FLOAT_KEY = "__codebreakers_nonfinite_float__"
+
 
 class Base(DeclarativeBase):
     """Declarative base for persistence models and Alembic metadata."""
@@ -187,11 +189,32 @@ def create_postgres_engine(database_url: str, **options: Any) -> Engine:
 
 def _clean_json(value: Any) -> Any:
     if isinstance(value, float) and not math.isfinite(value):
-        return None
+        kind = (
+            "nan"
+            if math.isnan(value)
+            else "positive_infinity"
+            if value > 0
+            else "negative_infinity"
+        )
+        return {_NONFINITE_FLOAT_KEY: kind}
     if isinstance(value, dict):
         return {key: _clean_json(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
         return [_clean_json(item) for item in value]
+    return value
+
+
+def _restore_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        if set(value) == {_NONFINITE_FLOAT_KEY}:
+            return {
+                "nan": math.nan,
+                "positive_infinity": math.inf,
+                "negative_infinity": -math.inf,
+            }[value[_NONFINITE_FLOAT_KEY]]
+        return {key: _restore_json(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_restore_json(item) for item in value]
     return value
 
 
@@ -221,6 +244,7 @@ def _candidate(data: dict[str, Any]) -> Candidate:
 
 
 def _decode_outcome(data: dict[str, Any]) -> AnalysisOutcome:
+    data = _restore_json(data)
     kind = data["kind"]
     if kind == "ranked-candidates":
         return AnalysisResult(
