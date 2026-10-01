@@ -18,7 +18,7 @@ test:
 	pytest -m 'not integration'
 
 integration:
-	pytest -m integration
+	pytest -m integration -o addopts=''
 
 coverage:
 	pytest -m 'not integration' --cov=codebreakers --cov-report=term-missing --cov-fail-under=80
