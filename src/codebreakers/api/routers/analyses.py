@@ -2,13 +2,38 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Request, Response, status
+from fastapi import APIRouter, Query, Request, Response, status
 
 from codebreakers.api.dependencies import AnalysisServiceDep
 from codebreakers.api.problems import problem_responses
-from codebreakers.api.schemas import AnalysisJobResponse, AnalysisRequest
+from codebreakers.api.schemas import (
+    AnalysisJobPageResponse,
+    AnalysisJobResponse,
+    AnalysisRequest,
+)
 
 router = APIRouter(prefix="/analyses", tags=["analyses"])
+
+
+@router.get(
+    "",
+    operation_id="list_analyses",
+    summary="List analyses",
+    responses=problem_responses(422),
+)
+def list_analyses(
+    service: AnalysisServiceDep,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> AnalysisJobPageResponse:
+    """Return retained jobs newest first using offset and limit pagination."""
+    jobs = service.list(offset, limit)
+    return AnalysisJobPageResponse(
+        items=[AnalysisJobResponse.from_job(job) for job in jobs],
+        total=service.count(),
+        offset=offset,
+        limit=limit,
+    )
 
 
 @router.post(

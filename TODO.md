@@ -210,27 +210,27 @@ Cipher encryption and decryption should remain stateless.
 
 ### Build
 
-- [ ] Define an application-layer `AnalysisRepository` protocol before choosing database models.
-- [ ] Model job identity, cipher type, sanitized parameters, status, timestamps, result summary, error code, and optimistic concurrency/version information.
-- [ ] Define explicit states such as `pending`, `running`, `succeeded`, `failed`, and `cancelled`, with validated transitions.
-- [ ] Add SQLAlchemy 2 and a PostgreSQL driver; implement the repository adapter under `infrastructure/persistence/`.
-- [ ] Add Alembic and commit an initial schema migration. Never initialize the production schema with `create_all`.
-- [ ] Add `POST /v1/analyses`, `GET /v1/analyses/{id}`, and a paginated listing endpoint backed by the repository.
-- [ ] Decide a retention policy for sensitive source text and results. Prefer short retention or user opt-in storage; avoid persisting raw keys unnecessarily.
-- [ ] Keep database URLs in environment-based settings and redact them from logs.
+- [x] Define an application-layer `AnalysisRepository` protocol before choosing database models.
+- [x] Model job identity, cipher type, sanitized parameters, status, timestamps, result summary, error code, and optimistic concurrency/version information.
+- [x] Define explicit states such as `pending`, `running`, `succeeded`, `failed`, and `cancelled`, with validated transitions.
+- [x] Add SQLAlchemy 2 and a PostgreSQL driver; implement the repository adapter under `infrastructure/persistence/`.
+- [x] Add Alembic and commit an initial schema migration. Never initialize the production schema with `create_all`.
+- [x] Add `POST /v1/analyses`, `GET /v1/analyses/{id}`, and a paginated listing endpoint backed by the repository.
+- [x] Decide a retention policy for sensitive source text and results. Prefer short retention or user opt-in storage; avoid persisting raw keys unnecessarily.
+- [x] Keep database URLs in environment-based settings and redact them from logs.
 
 ### Test
 
-- [ ] Use an in-memory repository fake for application service tests.
-- [ ] Use Testcontainers with real PostgreSQL for repository integration tests; do not rely on SQLite where PostgreSQL semantics matter.
-- [ ] Test migrations from an empty database and from the previous schema version.
-- [ ] Test pagination, concurrent updates, transition rejection, and retention deletion behavior.
+- [x] Use an in-memory repository fake for application service tests.
+- [x] Use Testcontainers with real PostgreSQL for repository integration tests; do not rely on SQLite where PostgreSQL semantics matter.
+- [x] Test migrations from an empty database and from the previous schema version. (This is the initial migration, so the integration test also covers downgrade to base and re-upgrade.)
+- [x] Test pagination, concurrent updates, transition rejection, and retention deletion behavior.
 
 ### Exit Criteria
 
-- [ ] Restarting the API does not lose submitted analysis metadata or results.
-- [ ] Application and domain modules do not import SQLAlchemy.
-- [ ] CI runs unit tests on every change and PostgreSQL integration tests on pull requests where Docker is available.
+- [x] Restarting the API does not lose submitted analysis metadata or results.
+- [x] Application and domain modules do not import SQLAlchemy.
+- [x] CI runs unit tests on every change and PostgreSQL integration tests on pull requests where Docker is available.
 
 ## Phase 6: Asynchronous Analysis Worker
 

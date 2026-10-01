@@ -36,6 +36,7 @@ def test_every_operation_is_documented() -> None:
         "encrypt_text",
         "decrypt_text",
         "create_analysis",
+        "list_analyses",
         "get_analysis",
         "get_liveness",
         "get_readiness",

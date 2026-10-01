@@ -1,4 +1,4 @@
-.PHONY: install format lint typecheck test coverage openapi serve
+.PHONY: install format lint typecheck test integration coverage openapi serve migrate
 
 install:
 	python -m pip install --upgrade pip
@@ -15,13 +15,19 @@ typecheck:
 	mypy src tests
 
 test:
-	pytest
+	pytest -m 'not integration'
+
+integration:
+	pytest -m integration -o addopts=''
 
 coverage:
-	pytest --cov=codebreakers --cov-report=term-missing --cov-fail-under=80
+	pytest -m 'not integration' --cov=codebreakers --cov-report=term-missing --cov-fail-under=80
 
 openapi:
 	python -c "from codebreakers.api.openapi import render_openapi_document as r; print(r(), end='')" > docs/api/openapi.json
 
 serve:
 	codebreakers serve
+
+migrate:
+	alembic upgrade head

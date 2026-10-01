@@ -1,7 +1,7 @@
 """Application service and ports for cryptanalysis jobs."""
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol
@@ -31,6 +31,20 @@ class AnalysisStatus(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+_ALLOWED_TRANSITIONS: Mapping[AnalysisStatus, frozenset[AnalysisStatus]] = {
+    AnalysisStatus.PENDING: frozenset(
+        {AnalysisStatus.RUNNING, AnalysisStatus.FAILED, AnalysisStatus.CANCELLED}
+    ),
+    AnalysisStatus.RUNNING: frozenset(
+        {AnalysisStatus.SUCCEEDED, AnalysisStatus.FAILED, AnalysisStatus.CANCELLED}
+    ),
+    AnalysisStatus.SUCCEEDED: frozenset(),
+    AnalysisStatus.FAILED: frozenset(),
+    AnalysisStatus.CANCELLED: frozenset(),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +58,43 @@ class AnalysisJob:
     created_at: datetime
     completed_at: datetime | None
     result: AnalysisOutcome | None
+    updated_at: datetime | None = None
+    error_code: str | None = None
+    version: int = 1
+    parameters: Mapping[str, str] = field(default_factory=dict)
+
+    def transition(
+        self,
+        status: AnalysisStatus,
+        at: datetime,
+        *,
+        result: AnalysisOutcome | None = None,
+        error_code: str | None = None,
+    ) -> "AnalysisJob":
+        """Return a versioned job in a valid next state."""
+        if status not in _ALLOWED_TRANSITIONS[self.status]:
+            msg = f"Cannot transition analysis from {self.status} to {status}."
+            raise ValueError(msg)
+        terminal = status in {
+            AnalysisStatus.SUCCEEDED,
+            AnalysisStatus.FAILED,
+            AnalysisStatus.CANCELLED,
+        }
+        if status is AnalysisStatus.SUCCEEDED and result is None:
+            msg = "A succeeded analysis requires a result."
+            raise ValueError(msg)
+        if status is AnalysisStatus.FAILED and not error_code:
+            msg = "A failed analysis requires an error code."
+            raise ValueError(msg)
+        return replace(
+            self,
+            status=status,
+            updated_at=at,
+            completed_at=at if terminal else None,
+            result=result,
+            error_code=error_code,
+            version=self.version + 1,
+        )
 
 
 class AnalysisRepository(Protocol):
@@ -55,6 +106,22 @@ class AnalysisRepository(Protocol):
 
     def get(self, job_id: UUID) -> AnalysisJob | None:
         """Return the job with the given identifier, if it exists."""
+        ...
+
+    def list(self, offset: int, limit: int) -> tuple[AnalysisJob, ...]:
+        """Return one page of jobs, ordered newest first."""
+        ...
+
+    def count(self) -> int:
+        """Return the number of retained jobs."""
+        ...
+
+    def update(self, job: AnalysisJob, expected_version: int) -> AnalysisJob:
+        """Replace a job only when its persisted version matches."""
+        ...
+
+    def delete_expired(self, before: datetime) -> int:
+        """Delete jobs whose creation time is older than the retention cutoff."""
         ...
 
 
@@ -86,20 +153,42 @@ class AnalysisService:
         return factory(model).analyze(text)
 
     def submit(self, analyzer: str, text: str, language: str) -> AnalysisJob:
-        """Run an analysis and record it as a completed job."""
+        """Run an analysis while persisting its validated lifecycle transitions."""
+        factory = self._analyzers.get(analyzer)
+        if factory is None:
+            raise UnsupportedAnalyzerError(analyzer, self._analyzers)
+        model = self._languages.get(language)
+        if model is None:
+            raise UnsupportedLanguageError(language, self._languages)
         created_at = self._clock()
-        outcome = self.analyze(analyzer, text, language)
-        job = AnalysisJob(
+        pending = AnalysisJob(
             id=self._id_factory(),
             analyzer=analyzer,
             language=language,
-            status=AnalysisStatus.SUCCEEDED,
+            status=AnalysisStatus.PENDING,
             created_at=created_at,
-            completed_at=self._clock(),
-            result=outcome,
+            completed_at=None,
+            result=None,
+            parameters={"language": language},
         )
-        self._repository.add(job)
-        return job
+        self._repository.add(pending)
+        running = pending.transition(AnalysisStatus.RUNNING, self._clock())
+        self._repository.update(running, expected_version=pending.version)
+        try:
+            outcome = factory(model).analyze(text)
+        except Exception:
+            failed = running.transition(
+                AnalysisStatus.FAILED,
+                self._clock(),
+                error_code="analysis-failed",
+            )
+            self._repository.update(failed, expected_version=running.version)
+            raise
+        succeeded = running.transition(
+            AnalysisStatus.SUCCEEDED, self._clock(), result=outcome
+        )
+        self._repository.update(succeeded, expected_version=running.version)
+        return succeeded
 
     def get(self, job_id: UUID) -> AnalysisJob:
         """Return a previously submitted job."""
@@ -107,3 +196,11 @@ class AnalysisService:
         if job is None:
             raise AnalysisNotFoundError(f"Analysis '{job_id}' was not found.")
         return job
+
+    def list(self, offset: int, limit: int) -> tuple[AnalysisJob, ...]:
+        """Return a page of retained analysis jobs."""
+        return self._repository.list(offset, limit)
+
+    def count(self) -> int:
+        """Return the number of retained analysis jobs."""
+        return self._repository.count()
