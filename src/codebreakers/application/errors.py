@@ -43,3 +43,7 @@ class UnsupportedLanguageError(UnsupportedCapabilityError):
 
 class AnalysisNotFoundError(ApplicationError):
     """Raised when an analysis job cannot be found."""
+
+
+class ConcurrentAnalysisUpdateError(ApplicationError):
+    """Raised when an analysis job changed since it was read."""

@@ -336,6 +336,7 @@ def test_create_and_fetch_analysis(client: TestClient) -> None:
     assert created.status_code == 201
     job = created.json()
     assert job["status"] == "succeeded"
+    assert job["version"] == 3
     assert job["language"] == "english"
     assert created.headers["location"] == f"/v1/analyses/{job['id']}"
     top = job["result"]["candidates"][0]
@@ -344,6 +345,30 @@ def test_create_and_fetch_analysis(client: TestClient) -> None:
     fetched = client.get(created.headers["location"])
     assert fetched.status_code == 200
     assert fetched.json() == job
+
+
+@pytest.mark.unit
+def test_list_analyses_is_paginated(client: TestClient) -> None:
+    for text in (CAESAR_CIPHERTEXT, "LXFOPVEFRNHR" * 3):
+        response = client.post(
+            "/v1/analyses",
+            json={"analyzer": "caesar-bruteforce", "text": text},
+        )
+        assert response.status_code == 201
+
+    page = client.get("/v1/analyses?offset=1&limit=1")
+    assert page.status_code == 200
+    assert page.json()["total"] == 2
+    assert page.json()["offset"] == 1
+    assert page.json()["limit"] == 1
+    assert len(page.json()["items"]) == 1
+
+
+@pytest.mark.unit
+def test_list_analyses_rejects_invalid_pagination(client: TestClient) -> None:
+    response = client.get("/v1/analyses?offset=-1")
+    assert response.status_code == 422
+    _assert_problem(response.json(), 422, "validation-error")
 
 
 @pytest.mark.unit

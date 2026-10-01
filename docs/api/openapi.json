@@ -1,6 +1,38 @@
 {
   "components": {
     "schemas": {
+      "AnalysisJobPageResponse": {
+        "description": "One paginated collection of analysis jobs.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisJobResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "offset",
+          "limit"
+        ],
+        "title": "AnalysisJobPageResponse",
+        "type": "object"
+      },
       "AnalysisJobResponse": {
         "description": "An analysis job resource.",
         "examples": [
@@ -25,7 +57,9 @@
               "language": "english",
               "language_version": "letter-frequency-v1"
             },
-            "status": "succeeded"
+            "status": "succeeded",
+            "updated_at": "2026-09-30T12:00:00.004Z",
+            "version": 3
           }
         ],
         "properties": {
@@ -49,6 +83,17 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
           },
           "id": {
             "format": "uuid",
@@ -90,6 +135,22 @@
           },
           "status": {
             "$ref": "#/components/schemas/AnalysisStatus"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
           }
         },
         "required": [
@@ -98,7 +159,10 @@
           "analyzer",
           "language",
           "created_at",
+          "updated_at",
           "completed_at",
+          "error_code",
+          "version",
           "result"
         ],
         "title": "AnalysisJobResponse",
@@ -151,7 +215,8 @@
           "pending",
           "running",
           "succeeded",
-          "failed"
+          "failed",
+          "cancelled"
         ],
         "title": "AnalysisStatus",
         "type": "string"
@@ -698,6 +763,71 @@
       }
     },
     "/v1/analyses": {
+      "get": {
+        "description": "Return retained jobs newest first using offset and limit pagination.",
+        "operationId": "list_analyses",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisJobPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "List analyses",
+        "tags": [
+          "analyses"
+        ]
+      },
       "post": {
         "description": "Run a keyless analysis and return the resulting job resource.\n\nSmall analyses currently complete synchronously, so the job is returned in\na terminal state. Clients should still inspect `status`, because queued\nexecution will later return non-terminal jobs.",
         "operationId": "create_analysis",

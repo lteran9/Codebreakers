@@ -206,7 +206,9 @@ class AnalysisJobResponse(BaseModel):
                     "analyzer": "caesar-bruteforce",
                     "language": "english",
                     "created_at": "2026-09-30T12:00:00Z",
+                    "updated_at": "2026-09-30T12:00:00.004Z",
                     "completed_at": "2026-09-30T12:00:00.004Z",
+                    "version": 3,
                     "result": {
                         "kind": "ranked-candidates",
                         "analyzer": "caesar-bruteforce",
@@ -234,7 +236,10 @@ class AnalysisJobResponse(BaseModel):
     analyzer: str
     language: str
     created_at: datetime
+    updated_at: datetime | None
     completed_at: datetime | None
+    error_code: str | None
+    version: int
     result: AnalysisResultModel | None
 
     @classmethod
@@ -246,9 +251,21 @@ class AnalysisJobResponse(BaseModel):
             analyzer=job.analyzer,
             language=job.language,
             created_at=job.created_at,
+            updated_at=job.updated_at,
             completed_at=job.completed_at,
+            error_code=job.error_code,
+            version=job.version,
             result=None if job.result is None else _result_model(job.result),
         )
+
+
+class AnalysisJobPageResponse(BaseModel):
+    """One paginated collection of analysis jobs."""
+
+    items: list[AnalysisJobResponse]
+    total: int
+    offset: int
+    limit: int
 
 
 def _result_model(

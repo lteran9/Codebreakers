@@ -12,6 +12,7 @@ from codebreakers.application.analysis import (
 )
 from codebreakers.application.errors import (
     AnalysisNotFoundError,
+    ConcurrentAnalysisUpdateError,
     UnsupportedAnalyzerError,
     UnsupportedLanguageError,
 )
@@ -122,3 +123,53 @@ def test_repository_evicts_oldest_job_at_capacity() -> None:
 def test_repository_rejects_non_positive_capacity() -> None:
     with pytest.raises(ValueError, match="capacity"):
         InMemoryAnalysisRepository(capacity=0)
+
+
+@pytest.mark.unit
+def test_job_transitions_require_valid_data_and_increment_version() -> None:
+    pending = AnalysisJob(
+        id=FIXED_ID,
+        analyzer="echo",
+        language="test",
+        status=AnalysisStatus.PENDING,
+        created_at=FIXED_TIME,
+        completed_at=None,
+        result=None,
+    )
+
+    running = pending.transition(AnalysisStatus.RUNNING, FIXED_TIME)
+    assert running.version == 2
+    assert running.updated_at == FIXED_TIME
+    with pytest.raises(ValueError, match="requires a result"):
+        running.transition(AnalysisStatus.SUCCEEDED, FIXED_TIME)
+    with pytest.raises(ValueError, match="requires an error code"):
+        running.transition(AnalysisStatus.FAILED, FIXED_TIME)
+    with pytest.raises(ValueError, match="Cannot transition"):
+        running.transition(AnalysisStatus.PENDING, FIXED_TIME)
+
+
+@pytest.mark.unit
+def test_repository_paginates_updates_and_deletes_expired_jobs() -> None:
+    repository = InMemoryAnalysisRepository(capacity=5)
+    ids = [UUID(int=index) for index in range(1, 4)]
+    for job_id in ids:
+        repository.add(_job(job_id))
+
+    assert repository.count() == 3
+    assert tuple(job.id for job in repository.list(0, 2)) == tuple(reversed(ids))[:2]
+    job = AnalysisJob(
+        id=UUID(int=4),
+        analyzer="echo",
+        language="test",
+        status=AnalysisStatus.PENDING,
+        created_at=FIXED_TIME,
+        completed_at=None,
+        result=None,
+    )
+    repository.add(job)
+    changed = job.transition(AnalysisStatus.RUNNING, FIXED_TIME)
+    assert repository.update(changed, expected_version=job.version) == changed
+    with pytest.raises(ConcurrentAnalysisUpdateError):
+        repository.update(changed, expected_version=job.version)
+    assert repository.delete_expired(FIXED_TIME.replace(year=2027)) == 4
+    assert repository.count() == 0

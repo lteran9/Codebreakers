@@ -34,13 +34,19 @@ make coverage
 
 ## Quality gates
 
-Run the checks locally with:
+Run the fast checks locally with:
 
 ```bash
-pytest
+make test
 ruff check .
 ruff format --check .
 mypy src tests
+```
+
+PostgreSQL integration tests use Testcontainers and require Docker:
+
+```bash
+make integration
 ```
 
 ## Command-line usage
@@ -106,7 +112,7 @@ curl -s http://127.0.0.1:8000/health/live
 curl -s http://127.0.0.1:8000/health/ready
 ```
 
-Errors are RFC 9457 `application/problem+json` bodies with a machine-readable `code` and a `correlation_id` that matches the `X-Request-ID` response header. Request bodies are limited to 64 KiB, text to 20,000 characters, and keys to 4,096 characters. Analysis jobs are held in memory until persistence arrives, so they do not survive a restart. See [ADR-0007](docs/architecture/ADR-0007-http-api-contract.md) for the full contract.
+Errors are RFC 9457 `application/problem+json` bodies with a machine-readable `code` and a `correlation_id` that matches the `X-Request-ID` response header. Request bodies are limited to 64 KiB, text to 20,000 characters, and keys to 4,096 characters. Analysis jobs are stored in memory by default. Set `CODEBREAKERS_DATABASE_URL` to use PostgreSQL, apply schema changes with `make migrate`, and schedule `python -m codebreakers.infrastructure.persistence.retention` daily. Results are retained for seven days by default (`CODEBREAKERS_ANALYSIS_RETENTION_DAYS`); submitted source text is never stored. See [ADR-0007](docs/architecture/ADR-0007-http-api-contract.md) for the HTTP contract and [ADR-0008](docs/architecture/ADR-0008-analysis-persistence.md) for persistence and retention decisions.
 
 The committed contract lives in [docs/api/openapi.json](docs/api/openapi.json). A test fails when the generated schema drifts; review the change and regenerate with `make openapi`.
 
