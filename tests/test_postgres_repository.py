@@ -11,7 +11,7 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, inspect
 from sqlalchemy.orm import sessionmaker
-from testcontainers.community.postgres import PostgresContainer
+from testcontainers.postgres import PostgresContainer
 
 from codebreakers.api.app import ApiSettings, create_app
 from codebreakers.application.analysis import AnalysisJob, AnalysisStatus
