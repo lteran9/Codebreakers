@@ -240,27 +240,27 @@ Cipher encryption and decryption should remain stateless.
 
 ### Build
 
-- [ ] Gate this phase on evidence of need: build the queue and worker only once an analyzer's p95 runtime exceeds the HTTP request budget (for example the substitution hill-climbing solver). If it is built earlier to demonstrate the pattern for the portfolio, say so explicitly in the ADR rather than framing it as demand-driven.
-- [ ] Define a `JobPublisher` application port and a serializable message schema containing a schema version and job ID, not the complete sensitive payload.
-- [ ] Implement an Azure Service Bus adapter and retain an in-process adapter for fast tests and local demonstrations.
-- [ ] Create `src/codebreakers/worker/` with a composition root that consumes a job, claims it atomically, runs the requested analyzer, and stores the result.
-- [ ] Make processing idempotent so redelivery cannot create duplicate results or invalid state transitions.
-- [ ] Configure bounded retries, exponential backoff, lock renewal, message completion, and dead-letter handling.
-- [ ] Add cancellation checks and per-job time or resource budgets.
-- [ ] Propagate correlation and trace context from API request to queue message and worker execution.
-- [ ] Document how dead-letter messages are inspected, replayed, or discarded.
+- [x] Gate this phase on evidence of need: build the queue and worker only once an analyzer's p95 runtime exceeds the HTTP request budget (for example the substitution hill-climbing solver). If it is built earlier to demonstrate the pattern for the portfolio, say so explicitly in the ADR rather than framing it as demand-driven. (Built ahead of demand as a portfolio demonstration; recorded in ADR-0009.)
+- [x] Define a `JobPublisher` application port and a serializable message schema containing a schema version and job ID, not the complete sensitive payload.
+- [x] Implement an Azure Service Bus adapter and retain an in-process adapter for fast tests and local demonstrations.
+- [x] Create `src/codebreakers/worker/` with a composition root that consumes a job, claims it atomically, runs the requested analyzer, and stores the result.
+- [x] Make processing idempotent so redelivery cannot create duplicate results or invalid state transitions.
+- [x] Configure bounded retries, exponential backoff, lock renewal, message completion, and dead-letter handling.
+- [x] Add cancellation checks and per-job time or resource budgets.
+- [x] Propagate correlation and trace context from API request to queue message and worker execution.
+- [x] Document how dead-letter messages are inspected, replayed, or discarded.
 
 ### Test
 
-- [ ] Contract-test every `JobPublisher` adapter against shared behavior tests.
-- [ ] Test duplicate delivery, transient failure, poison messages, cancellation, and worker termination during processing.
-- [ ] Add an integration test against a local Service Bus-compatible strategy if support is adequate; otherwise use a dedicated Azure test namespace in a manually triggered CI workflow.
+- [x] Contract-test every `JobPublisher` adapter against shared behavior tests.
+- [x] Test duplicate delivery, transient failure, poison messages, cancellation, and worker termination during processing.
+- [x] Add an integration test against a local Service Bus-compatible strategy if support is adequate; otherwise use a dedicated Azure test namespace in a manually triggered CI workflow. (`Service Bus integration` workflow; first run needs the namespace provisioned in Phase 8.)
 
 ### Exit Criteria
 
-- [ ] The API acknowledges a submitted job quickly and exposes status polling.
-- [ ] A worker outage leaves jobs recoverable, and duplicate delivery is safe.
-- [ ] API and worker can be scaled and deployed independently.
+- [x] The API acknowledges a submitted job quickly and exposes status polling.
+- [x] A worker outage leaves jobs recoverable, and duplicate delivery is safe.
+- [x] API and worker can be scaled and deployed independently.
 
 ## Phase 7: Containers and Local Production Simulation
 

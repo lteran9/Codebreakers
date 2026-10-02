@@ -21,6 +21,12 @@ make test
 make coverage
 ```
 
+`make integration` runs the PostgreSQL integration tests and needs a running
+Docker daemon. The Service Bus `JobPublisher` contract is skipped unless
+`CODEBREAKERS_TEST_SERVICEBUS_CONNECTION_STRING` points at a dedicated test
+namespace. In CI it runs only from the manually triggered
+`Service Bus integration` workflow.
+
 ## Commit and pull request guidance
 
 - Keep changes focused and small.

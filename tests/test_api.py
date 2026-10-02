@@ -1,7 +1,9 @@
 """Contract tests for the HTTP API using FastAPI's test client."""
 
 import logging
+import time
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +22,12 @@ from codebreakers.domain.errors import (
     InvalidKeyError,
     UnknownSymbolError,
 )
+from codebreakers.worker.execution import InlineAnalysisExecutor
+from codebreakers.worker.settings import (
+    ConfigurationError,
+    QueueBackend,
+    WorkerSettings,
+)
 
 PROBLEM_JSON = "application/problem+json"
 CAESAR_CIPHERTEXT = (
@@ -30,10 +38,37 @@ CAESAR_PLAINTEXT = (
 )
 
 
+TERMINAL = {"succeeded", "failed", "cancelled"}
+
+
+def _local_app() -> Any:
+    """Build an app whose in-process worker runs analyzers inline for speed."""
+    return create_app(
+        ApiSettings(worker=WorkerSettings()), executor=InlineAnalysisExecutor()
+    )
+
+
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    with TestClient(create_app(), raise_server_exceptions=False) as test_client:
+    with TestClient(_local_app(), raise_server_exceptions=False) as test_client:
         yield test_client
+
+
+def _wait_for_terminal(
+    client: TestClient, location: str, timeout: float = 10.0
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    while True:
+        job: dict[str, Any] = client.get(location).json()
+        if job["status"] in TERMINAL or time.monotonic() > deadline:
+            return job
+        time.sleep(0.02)
+
+
+def _submit(client: TestClient, body: dict[str, str]) -> dict[str, Any]:
+    created = client.post("/v1/analyses", json=body)
+    assert created.status_code == 202
+    return _wait_for_terminal(client, created.headers["location"])
 
 
 def _assert_problem(response_json: dict[str, object], status: int, code: str) -> None:
@@ -328,33 +363,82 @@ def test_wrong_method_returns_problem(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_create_and_fetch_analysis(client: TestClient) -> None:
+def test_submit_is_accepted_then_polled_to_completion(client: TestClient) -> None:
     created = client.post(
         "/v1/analyses",
         json={"analyzer": "caesar-bruteforce", "text": CAESAR_CIPHERTEXT},
     )
-    assert created.status_code == 201
-    job = created.json()
+    assert created.status_code == 202
+    accepted = created.json()
+    assert accepted["status"] == "pending"
+    assert accepted["version"] == 1
+    assert accepted["result"] is None
+    assert accepted["completed_at"] is None
+    assert accepted["language"] == "english"
+    assert created.headers["location"] == f"/v1/analyses/{accepted['id']}"
+
+    job = _wait_for_terminal(client, created.headers["location"])
     assert job["status"] == "succeeded"
     assert job["version"] == 3
-    assert job["language"] == "english"
-    assert created.headers["location"] == f"/v1/analyses/{job['id']}"
+    assert job["error_code"] is None
     top = job["result"]["candidates"][0]
     assert (top["rank"], top["key"], top["text"]) == (1, "3", CAESAR_PLAINTEXT)
 
-    fetched = client.get(created.headers["location"])
-    assert fetched.status_code == 200
-    assert fetched.json() == job
+
+@pytest.mark.unit
+def test_submit_without_running_worker_stays_pending() -> None:
+    app = _local_app()
+    client = TestClient(app)  # no context manager, so the lifespan never starts
+    created = client.post(
+        "/v1/analyses", json={"analyzer": "caesar-bruteforce", "text": "KHOOR"}
+    )
+    assert created.status_code == 202
+    assert client.get(created.headers["location"]).json()["status"] == "pending"
+
+    app.state.job_runtime.run_until_idle()
+
+    assert client.get(created.headers["location"]).json()["status"] == "succeeded"
+
+
+@pytest.mark.unit
+def test_trace_context_is_propagated_to_the_worker(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="codebreakers.worker")
+    traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    created = client.post(
+        "/v1/analyses",
+        json={"analyzer": "caesar-bruteforce", "text": CAESAR_CIPHERTEXT},
+        headers={"X-Request-ID": "trace-check", "traceparent": traceparent},
+    )
+    _wait_for_terminal(client, created.headers["location"])
+
+    processed = [r.getMessage() for r in caplog.records if "job_processed" in r.message]
+    assert any(
+        "correlation_id=trace-check" in line and f"traceparent={traceparent}" in line
+        for line in processed
+    )
+
+
+@pytest.mark.unit
+def test_invalid_traceparent_is_not_propagated(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="codebreakers.worker")
+    created = client.post(
+        "/v1/analyses",
+        json={"analyzer": "caesar-bruteforce", "text": "KHOOR"},
+        headers={"traceparent": "00-zz forged=1"},
+    )
+    _wait_for_terminal(client, created.headers["location"])
+    assert "forged" not in caplog.text
+    assert "traceparent=-" in caplog.text
 
 
 @pytest.mark.unit
 def test_list_analyses_is_paginated(client: TestClient) -> None:
     for text in (CAESAR_CIPHERTEXT, "LXFOPVEFRNHR" * 3):
-        response = client.post(
-            "/v1/analyses",
-            json={"analyzer": "caesar-bruteforce", "text": text},
-        )
-        assert response.status_code == 201
+        _submit(client, {"analyzer": "caesar-bruteforce", "text": text})
 
     page = client.get("/v1/analyses?offset=1&limit=1")
     assert page.status_code == 200
@@ -384,19 +468,16 @@ def test_list_analyses_rejects_invalid_pagination(client: TestClient) -> None:
 def test_each_analyzer_returns_its_result_kind(
     client: TestClient, analyzer: str, text: str, kind: str
 ) -> None:
-    response = client.post("/v1/analyses", json={"analyzer": analyzer, "text": text})
-    assert response.status_code == 201
-    assert response.json()["result"]["kind"] == kind
-    assert response.json()["result"]["analyzer"] == analyzer
+    job = _submit(client, {"analyzer": analyzer, "text": text})
+    assert job["status"] == "succeeded"
+    assert job["result"]["kind"] == kind
+    assert job["result"]["analyzer"] == analyzer
 
 
 @pytest.mark.unit
 def test_non_finite_scores_serialize_as_null(client: TestClient) -> None:
-    response = client.post(
-        "/v1/analyses", json={"analyzer": "caesar-bruteforce", "text": "12345"}
-    )
-    assert response.status_code == 201
-    assert response.json()["result"]["candidates"][0]["score"] is None
+    job = _submit(client, {"analyzer": "caesar-bruteforce", "text": "12345"})
+    assert job["result"]["candidates"][0]["score"] is None
 
 
 @pytest.mark.unit
@@ -408,7 +489,6 @@ def test_non_finite_scores_serialize_as_null(client: TestClient) -> None:
             {"analyzer": "caesar-bruteforce", "text": "ABC", "language": "klingon"},
             "unsupported-language",
         ),
-        ({"analyzer": "vigenere-frequency", "text": "SHORT"}, "insufficient-text"),
     ],
 )
 def test_analysis_errors_return_422(
@@ -417,6 +497,28 @@ def test_analysis_errors_return_422(
     response = client.post("/v1/analyses", json=body)
     assert response.status_code == 422
     _assert_problem(response.json(), 422, code)
+
+
+@pytest.mark.unit
+def test_analyzer_rejection_fails_the_job_with_an_error_code(
+    client: TestClient,
+) -> None:
+    job = _submit(client, {"analyzer": "vigenere-frequency", "text": "SHORT"})
+    assert job["status"] == "failed"
+    assert job["error_code"] == "insufficient-text"
+    assert job["result"] is None
+
+
+@pytest.mark.unit
+def test_service_bus_backend_requires_a_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CODEBREAKERS_DATABASE_URL", raising=False)
+    settings = ApiSettings(
+        worker=WorkerSettings(queue_backend=QueueBackend.SERVICE_BUS)
+    )
+    with pytest.raises(ConfigurationError, match="CODEBREAKERS_DATABASE_URL"):
+        create_app(settings)
 
 
 @pytest.mark.unit
@@ -479,7 +581,7 @@ def test_readiness_reports_failing_checks() -> None:
 def test_logs_never_contain_text_or_keys(caplog: pytest.LogCaptureFixture) -> None:
     secret_text = "MEETATTHEOLDMILLATMIDNIGHT"
     secret_key = "ZEBRAS"
-    app = create_app()
+    app = _local_app()
     caplog.set_level(logging.DEBUG)
 
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -492,9 +594,8 @@ def test_logs_never_contain_text_or_keys(caplog: pytest.LogCaptureFixture) -> No
         client.post(
             "/v1/ciphers/caesar/encrypt", json={"text": secret_text, "key": secret_key}
         )
-        client.post(
-            "/v1/analyses", json={"analyzer": "caesar-bruteforce", "text": secret_text}
-        )
+        _submit(client, {"analyzer": "caesar-bruteforce", "text": secret_text})
+        _submit(client, {"analyzer": "vigenere-frequency", "text": secret_text})
 
         def exploding_runner(*_args: object) -> str:
             raise RuntimeError(secret_text)

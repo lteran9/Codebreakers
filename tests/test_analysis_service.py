@@ -16,6 +16,7 @@ from codebreakers.application.errors import (
     UnsupportedAnalyzerError,
     UnsupportedLanguageError,
 )
+from codebreakers.application.messaging import AnalysisJobMessage, TraceContext
 from codebreakers.domain.cryptanalysis.models import (
     AnalysisResult,
     Analyzer,
@@ -68,18 +69,35 @@ def _job(job_id: UUID) -> AnalysisJob:
 
 
 @pytest.mark.unit
-def test_submit_records_succeeded_job() -> None:
+def test_submit_queues_pending_job_with_input_and_outbox_message() -> None:
     repository = InMemoryAnalysisRepository()
     service = _service(repository)
+    trace = TraceContext(correlation_id="req-1", traceparent=None)
 
-    job = service.submit("echo", "ABC", "test")
+    job = service.submit("echo", "ABC", "test", trace)
 
     assert job.id == FIXED_ID
-    assert job.status is AnalysisStatus.SUCCEEDED
-    assert job.created_at == job.completed_at == FIXED_TIME
-    assert isinstance(job.result, AnalysisResult)
-    assert job.result.language_version == "v0"
+    assert job.status is AnalysisStatus.PENDING
+    assert job.created_at == FIXED_TIME
+    assert job.completed_at is None
+    assert job.result is None
     assert service.get(FIXED_ID) == job
+    assert repository.get_source_text(FIXED_ID) == "ABC"
+    published: list[AnalysisJobMessage] = []
+    assert repository.relay(published.append, limit=10) == 1
+    assert published == [AnalysisJobMessage(job_id=FIXED_ID, trace=trace)]
+    assert repository.relay(published.append, limit=10) == 0
+
+
+@pytest.mark.unit
+def test_submit_rejects_unsupported_names_before_queueing() -> None:
+    repository = InMemoryAnalysisRepository()
+    service = _service(repository)
+    with pytest.raises(UnsupportedAnalyzerError):
+        service.submit("nope", "ABC", "test")
+    with pytest.raises(UnsupportedLanguageError):
+        service.submit("echo", "ABC", "klingon")
+    assert repository.count() == 0
 
 
 @pytest.mark.unit
