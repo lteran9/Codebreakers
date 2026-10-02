@@ -13,6 +13,7 @@ from codebreakers.api import ApiSettings, create_app
 from codebreakers.api.dependencies import get_cipher_runner
 from codebreakers.application.errors import UnsupportedCipherError
 from codebreakers.cli.main import app as cli_app
+from codebreakers.composition import create_analysis_service
 from codebreakers.domain.errors import (
     AmbiguousKeyError,
     CodebreakersError,
@@ -519,6 +520,24 @@ def test_service_bus_backend_requires_a_database(
     )
     with pytest.raises(ConfigurationError, match="CODEBREAKERS_DATABASE_URL"):
         create_app(settings)
+
+
+@pytest.mark.unit
+def test_injected_analysis_service_requires_service_bus() -> None:
+    with pytest.raises(ConfigurationError, match="service-bus queue backend"):
+        create_app(analysis_service=create_analysis_service())
+
+
+@pytest.mark.unit
+def test_injected_analysis_service_does_not_bypass_service_bus_database_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CODEBREAKERS_DATABASE_URL", raising=False)
+    settings = ApiSettings(
+        worker=WorkerSettings(queue_backend=QueueBackend.SERVICE_BUS)
+    )
+    with pytest.raises(ConfigurationError, match="CODEBREAKERS_DATABASE_URL"):
+        create_app(settings, analysis_service=create_analysis_service())
 
 
 @pytest.mark.unit

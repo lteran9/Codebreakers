@@ -73,12 +73,16 @@ def create_app(
     With ``service-bus`` it only records jobs; separate ``codebreakers relay``
     and ``codebreakers worker`` processes publish and run them. ``executor``
     overrides how the in-process worker runs analyzers, mainly for tests.
+    Injected analysis services require the ``service-bus`` backend.
     """
     active = settings or ApiSettings()
     database_url = active.database_url or os.environ.get("CODEBREAKERS_DATABASE_URL")
     distributed = active.worker.queue_backend is QueueBackend.SERVICE_BUS
-    if distributed and analysis_service is None and database_url is None:
+    if distributed and database_url is None:
         msg = "The service-bus queue backend requires CODEBREAKERS_DATABASE_URL."
+        raise ConfigurationError(msg)
+    if analysis_service is not None and not distributed:
+        msg = "An injected analysis_service requires the service-bus queue backend."
         raise ConfigurationError(msg)
     engine: Engine | None = None
     runtime: InProcessRuntime | None = None
