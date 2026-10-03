@@ -13,7 +13,7 @@ from codebreakers.application.errors import InvalidJobMessageError
 ANALYSIS_JOB_MESSAGE_SCHEMA_VERSION = 1
 
 _CORRELATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_TRACEPARENT = re.compile(r"^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$")
+_TRACEPARENT = re.compile(r"^(?!ff-)[0-9a-f]{2}-(?!0{32}-)[0-9a-f]{32}-(?!0{16}-)[0-9a-f]{16}-[0-9a-f]{2}$")
 
 
 @dataclass(frozen=True, slots=True)
