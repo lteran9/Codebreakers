@@ -82,6 +82,10 @@ def test_migration_creates_expected_schema(database_engine: Engine) -> None:
     )
     job_columns = {column["name"] for column in inspector.get_columns("analysis_jobs")}
     assert {"attempts", "lease_expires_at"} <= job_columns
+    input_columns = {
+        column["name"] for column in inspector.get_columns("analysis_job_inputs")
+    }
+    assert {"correlation_id", "traceparent"} <= input_columns
     assert "source_text" not in job_columns
     for table in ("analysis_job_inputs", "analysis_outbox"):
         (foreign_key,) = inspector.get_foreign_keys(table)
@@ -185,7 +189,10 @@ def test_repository_round_trip_pagination_concurrency_and_retention(
 
 
 def _message(job_id: UUID) -> AnalysisJobMessage:
-    return AnalysisJobMessage(job_id=job_id, trace=TraceContext("req-1"))
+    trace = TraceContext(
+        "req-1", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    )
+    return AnalysisJobMessage(job_id=job_id, trace=trace)
 
 
 @pytest.mark.integration
@@ -355,9 +362,9 @@ def test_recover_republishes_unfinished_jobs_without_outbox_entries(
     finished = done.transition(AnalysisStatus.FAILED, FIXED_TIME, error_code="x")
     repository.update(finished, expected_version=done.version)
 
-    recovered: list[UUID] = []
-    assert repository.recover(lambda m: recovered.append(m.job_id), limit=10) == 1
-    assert recovered == [relayed.id]
+    recovered: list[AnalysisJobMessage] = []
+    assert repository.recover(recovered.append, limit=10) == 1
+    assert recovered == [_message(relayed.id)]
 
 
 @pytest.mark.integration

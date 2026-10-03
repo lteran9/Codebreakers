@@ -25,6 +25,8 @@ def upgrade() -> None:
         "analysis_job_inputs",
         sa.Column("job_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("source_text", sa.Text(), nullable=False),
+        sa.Column("correlation_id", sa.String(length=128), nullable=True),
+        sa.Column("traceparent", sa.String(length=55), nullable=True),
         sa.ForeignKeyConstraint(["job_id"], ["analysis_jobs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("job_id"),
     )

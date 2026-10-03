@@ -50,7 +50,8 @@ POST /v1/analyses ──► one DB transaction: job (pending) + input + outbox r
   fails, the deletions already made are committed and the rest stay queued.
   Delivery is therefore *at least once*.
 - **Source text:** Text is stored in `analysis_job_inputs` only until the job
-  reaches a terminal state. It is deleted in the same transaction as that
+  reaches a terminal state, alongside the correlation ID and traceparent so
+  recovered jobs keep their request context. It is deleted in the same transaction as that
   transition. Rows left behind by a stuck job cascade-delete with the job when
   the retention purge runs.
 - **Ports:** `JobPublisher` and `AnalysisOutbox` live in the application

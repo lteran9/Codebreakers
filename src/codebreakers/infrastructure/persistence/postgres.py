@@ -36,7 +36,11 @@ from codebreakers.application.analysis import (
     AnalysisStatus,
 )
 from codebreakers.application.errors import ConcurrentAnalysisUpdateError
-from codebreakers.application.messaging import AnalysisJobMessage, AnalysisOutbox
+from codebreakers.application.messaging import (
+    AnalysisJobMessage,
+    AnalysisOutbox,
+    TraceContext,
+)
 from codebreakers.domain.cryptanalysis.analyzers import (
     VigenereAnalysisResult,
     VigenereKeyLengthCandidate,
@@ -84,7 +88,7 @@ class AnalysisRecord(Base):
 
 
 class AnalysisInputRecord(Base):
-    """Source text kept only until its job reaches a terminal state."""
+    """Source text and trace context kept until the job reaches a terminal state."""
 
     __tablename__ = "analysis_job_inputs"
 
@@ -94,6 +98,8 @@ class AnalysisInputRecord(Base):
         primary_key=True,
     )
     source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    correlation_id: Mapped[str | None] = mapped_column(String(128))
+    traceparent: Mapped[str | None] = mapped_column(String(55))
 
 
 class OutboxRecord(Base):
@@ -140,7 +146,14 @@ class SqlAlchemyAnalysisRepository(AnalysisRepository, AnalysisOutbox):
         with self._sessions.begin() as session:
             session.add(_to_record(job))
             session.flush()
-            session.add(AnalysisInputRecord(job_id=job.id, source_text=source_text))
+            session.add(
+                AnalysisInputRecord(
+                    job_id=job.id,
+                    source_text=source_text,
+                    correlation_id=message.trace.correlation_id,
+                    traceparent=message.trace.traceparent,
+                )
+            )
             session.add(
                 OutboxRecord(
                     job_id=job.id,
@@ -155,8 +168,16 @@ class SqlAlchemyAnalysisRepository(AnalysisRepository, AnalysisOutbox):
             msg = "limit must be positive."
             raise ValueError(msg)
         with self._sessions() as session:
-            job_ids = session.scalars(
-                select(AnalysisRecord.id)
+            rows = session.execute(
+                select(
+                    AnalysisRecord.id,
+                    AnalysisInputRecord.correlation_id,
+                    AnalysisInputRecord.traceparent,
+                )
+                .outerjoin(
+                    AnalysisInputRecord,
+                    AnalysisInputRecord.job_id == AnalysisRecord.id,
+                )
                 .where(
                     AnalysisRecord.status.in_(
                         [AnalysisStatus.PENDING.value, AnalysisStatus.RUNNING.value]
@@ -166,9 +187,10 @@ class SqlAlchemyAnalysisRepository(AnalysisRepository, AnalysisOutbox):
                 .order_by(AnalysisRecord.created_at)
                 .limit(limit)
             ).all()
-        for job_id in job_ids:
-            publish(AnalysisJobMessage(job_id=job_id))
-        return len(job_ids)
+        for job_id, correlation_id, traceparent in rows:
+            trace = TraceContext.sanitized(correlation_id, traceparent)
+            publish(AnalysisJobMessage(job_id=job_id, trace=trace))
+        return len(rows)
 
     def get_source_text(self, job_id: UUID) -> str | None:
         """Return retained source text for an unfinished job."""
