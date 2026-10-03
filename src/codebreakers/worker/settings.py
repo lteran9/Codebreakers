@@ -70,7 +70,7 @@ class WorkerSettings:
                         source.get("CODEBREAKERS_ANALYSIS_TIME_BUDGET_SECONDS", "30")
                     )
                 ),
-                memory_limit_mb=memory if memory > 0 else None,
+                memory_limit_mb=memory if memory != 0 else None,
                 max_attempts=int(source.get("CODEBREAKERS_WORKER_MAX_ATTEMPTS", "5")),
                 retry_base_delay=timedelta(
                     seconds=float(
