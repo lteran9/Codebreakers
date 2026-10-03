@@ -1,16 +1,22 @@
-"""Process-local analysis repository used until durable persistence exists."""
+"""Process-local analysis repository for tests and ephemeral local use."""
 
 from collections import OrderedDict
+from collections.abc import Callable
 from datetime import datetime
 from threading import Lock
 from uuid import UUID
 
 from codebreakers.application.analysis import AnalysisJob, AnalysisRepository
 from codebreakers.application.errors import ConcurrentAnalysisUpdateError
+from codebreakers.application.messaging import AnalysisJobMessage, AnalysisOutbox
 
 
-class InMemoryAnalysisRepository(AnalysisRepository):
-    """Bounded, thread-safe store that evicts the oldest job when full."""
+class InMemoryAnalysisRepository(AnalysisRepository, AnalysisOutbox):
+    """Bounded, thread-safe store that evicts the oldest job when full.
+
+    Source text and outbox entries live alongside jobs and are evicted with
+    them.
+    """
 
     def __init__(self, capacity: int = 128) -> None:
         if capacity < 1:
@@ -18,17 +24,71 @@ class InMemoryAnalysisRepository(AnalysisRepository):
             raise ValueError(msg)
         self._capacity = capacity
         self._jobs: OrderedDict[UUID, AnalysisJob] = OrderedDict()
+        self._inputs: dict[UUID, str] = {}
+        self._outbox: OrderedDict[UUID, AnalysisJobMessage] = OrderedDict()
         self._lock = Lock()
 
     def add(self, job: AnalysisJob) -> None:
         """Store a job, evicting the oldest entry if capacity is exceeded."""
         with self._lock:
-            if job.id in self._jobs:
-                msg = f"Analysis '{job.id}' already exists."
-                raise ValueError(msg)
-            self._jobs[job.id] = job
-            while len(self._jobs) > self._capacity:
-                self._jobs.popitem(last=False)
+            self._insert(job)
+
+    def enqueue(
+        self, job: AnalysisJob, source_text: str, message: AnalysisJobMessage
+    ) -> None:
+        """Store a pending job with its source text and an outbox entry."""
+        with self._lock:
+            self._insert(job)
+            self._inputs[job.id] = source_text
+            self._outbox[job.id] = message
+
+    def get_source_text(self, job_id: UUID) -> str | None:
+        """Return retained source text for an unfinished job."""
+        with self._lock:
+            return self._inputs.get(job_id)
+
+    def relay(self, publish: Callable[[AnalysisJobMessage], None], limit: int) -> int:
+        """Publish pending outbox entries oldest first, stopping at a failure."""
+        if limit < 1:
+            msg = "limit must be positive."
+            raise ValueError(msg)
+        with self._lock:
+            batch = list(self._outbox.items())[:limit]
+        published = 0
+        for job_id, message in batch:
+            publish(message)
+            with self._lock:
+                self._outbox.pop(job_id, None)
+            published += 1
+        return published
+
+    def recover(self, publish: Callable[[AnalysisJobMessage], None], limit: int) -> int:
+        """Publish messages for unfinished jobs that have no outbox entry."""
+        if limit < 1:
+            msg = "limit must be positive."
+            raise ValueError(msg)
+        with self._lock:
+            orphaned = [
+                job_id
+                for job_id, job in self._jobs.items()
+                if not job.is_terminal and job_id not in self._outbox
+            ][:limit]
+        for job_id in orphaned:
+            publish(AnalysisJobMessage(job_id=job_id))
+        return len(orphaned)
+
+    def _insert(self, job: AnalysisJob) -> None:
+        if job.id in self._jobs:
+            msg = f"Analysis '{job.id}' already exists."
+            raise ValueError(msg)
+        self._jobs[job.id] = job
+        while len(self._jobs) > self._capacity:
+            evicted, _ = self._jobs.popitem(last=False)
+            self._forget(evicted)
+
+    def _forget(self, job_id: UUID) -> None:
+        self._inputs.pop(job_id, None)
+        self._outbox.pop(job_id, None)
 
     def get(self, job_id: UUID) -> AnalysisJob | None:
         """Return a stored job, or ``None`` if unknown or evicted."""
@@ -65,6 +125,8 @@ class InMemoryAnalysisRepository(AnalysisRepository):
                 msg = "Updated job version must increment the expected version by one."
                 raise ValueError(msg)
             self._jobs[job.id] = job
+            if job.is_terminal:
+                self._inputs.pop(job.id, None)
             return job
 
     def delete_expired(self, before: datetime) -> int:
@@ -75,4 +137,5 @@ class InMemoryAnalysisRepository(AnalysisRepository):
             ]
             for job_id in expired:
                 del self._jobs[job_id]
+                self._forget(job_id)
             return len(expired)

@@ -1,6 +1,7 @@
 """SQLAlchemy repository adapter for durable analysis jobs."""
 
 import math
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -8,14 +9,19 @@ from uuid import UUID
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     CheckConstraint,
     DateTime,
+    ForeignKey,
+    Identity,
     Index,
     Integer,
     String,
+    Text,
     Uuid,
     create_engine,
     delete,
+    exists,
     func,
     select,
     update,
@@ -30,6 +36,11 @@ from codebreakers.application.analysis import (
     AnalysisStatus,
 )
 from codebreakers.application.errors import ConcurrentAnalysisUpdateError
+from codebreakers.application.messaging import (
+    AnalysisJobMessage,
+    AnalysisOutbox,
+    TraceContext,
+)
 from codebreakers.domain.cryptanalysis.analyzers import (
     VigenereAnalysisResult,
     VigenereKeyLengthCandidate,
@@ -72,9 +83,44 @@ class AnalysisRecord(Base):
     result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     error_code: Mapped[str | None] = mapped_column(String(64))
     version: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class SqlAlchemyAnalysisRepository(AnalysisRepository):
+class AnalysisInputRecord(Base):
+    """Source text and trace context kept until the job reaches a terminal state."""
+
+    __tablename__ = "analysis_job_inputs"
+
+    job_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("analysis_jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    correlation_id: Mapped[str | None] = mapped_column(String(128))
+    traceparent: Mapped[str | None] = mapped_column(String(55))
+
+
+class OutboxRecord(Base):
+    """Job message committed with its job and awaiting publication."""
+
+    __tablename__ = "analysis_outbox"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    job_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("analysis_jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class SqlAlchemyAnalysisRepository(AnalysisRepository, AnalysisOutbox):
     """Persist analysis jobs with optimistic concurrency and bounded retention."""
 
     def __init__(
@@ -89,22 +135,102 @@ class SqlAlchemyAnalysisRepository(AnalysisRepository):
         self.retention_days = retention_days
 
     def add(self, job: AnalysisJob) -> None:
-        """Insert a new job without retaining its submitted source text."""
-        record = AnalysisRecord(
-            id=job.id,
-            analyzer=job.analyzer,
-            language=job.language,
-            parameters=dict(job.parameters),
-            status=job.status.value,
-            created_at=job.created_at,
-            updated_at=job.updated_at,
-            completed_at=job.completed_at,
-            result=None if job.result is None else _encode_outcome(job.result),
-            error_code=job.error_code,
-            version=job.version,
-        )
+        """Insert a new job without source text or an outbox entry."""
         with self._sessions.begin() as session:
-            session.add(record)
+            session.add(_to_record(job))
+
+    def enqueue(
+        self, job: AnalysisJob, source_text: str, message: AnalysisJobMessage
+    ) -> None:
+        """Insert a pending job, its source text, and its outbox message together."""
+        with self._sessions.begin() as session:
+            session.add(_to_record(job))
+            session.flush()
+            session.add(
+                AnalysisInputRecord(
+                    job_id=job.id,
+                    source_text=source_text,
+                    correlation_id=message.trace.correlation_id,
+                    traceparent=message.trace.traceparent,
+                )
+            )
+            session.add(
+                OutboxRecord(
+                    job_id=job.id,
+                    payload=message.to_json(),
+                    created_at=job.created_at,
+                )
+            )
+
+    def recover(self, publish: Callable[[AnalysisJobMessage], None], limit: int) -> int:
+        """Publish messages for unfinished jobs that have no outbox entry."""
+        if limit < 1:
+            msg = "limit must be positive."
+            raise ValueError(msg)
+        with self._sessions() as session:
+            rows = session.execute(
+                select(
+                    AnalysisRecord.id,
+                    AnalysisInputRecord.correlation_id,
+                    AnalysisInputRecord.traceparent,
+                )
+                .outerjoin(
+                    AnalysisInputRecord,
+                    AnalysisInputRecord.job_id == AnalysisRecord.id,
+                )
+                .where(
+                    AnalysisRecord.status.in_(
+                        [AnalysisStatus.PENDING.value, AnalysisStatus.RUNNING.value]
+                    ),
+                    ~exists().where(OutboxRecord.job_id == AnalysisRecord.id),
+                )
+                .order_by(AnalysisRecord.created_at)
+                .limit(limit)
+            ).all()
+        for job_id, correlation_id, traceparent in rows:
+            trace = TraceContext.sanitized(correlation_id, traceparent)
+            publish(AnalysisJobMessage(job_id=job_id, trace=trace))
+        return len(rows)
+
+    def get_source_text(self, job_id: UUID) -> str | None:
+        """Return retained source text for an unfinished job."""
+        with self._sessions() as session:
+            record = session.get(AnalysisInputRecord, job_id)
+            return None if record is None else record.source_text
+
+    def relay(self, publish: Callable[[AnalysisJobMessage], None], limit: int) -> int:
+        """Publish locked outbox rows oldest first, skipping rows held elsewhere.
+
+        ``FOR UPDATE SKIP LOCKED`` lets several relays run concurrently without
+        publishing the same row twice. Deletions of rows published before a
+        failure are committed before the failure is re-raised.
+        """
+        if limit < 1:
+            msg = "limit must be positive."
+            raise ValueError(msg)
+        failure: Exception | None = None
+        published: list[int] = []
+        with self._sessions.begin() as session:
+            rows = session.scalars(
+                select(OutboxRecord)
+                .order_by(OutboxRecord.id)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            ).all()
+            for row in rows:
+                try:
+                    publish(AnalysisJobMessage.from_json(row.payload))
+                except Exception as err:  # re-raised once earlier deletions commit
+                    failure = err
+                    break
+                published.append(row.id)
+            if published:
+                session.execute(
+                    delete(OutboxRecord).where(OutboxRecord.id.in_(published))
+                )
+        if failure is not None:
+            raise failure
+        return len(published)
 
     def get(self, job_id: UUID) -> AnalysisJob | None:
         """Return one stored job, if present."""
@@ -143,6 +269,8 @@ class SqlAlchemyAnalysisRepository(AnalysisRepository):
             "result": None if job.result is None else _encode_outcome(job.result),
             "error_code": job.error_code,
             "version": job.version,
+            "attempts": job.attempts,
+            "lease_expires_at": job.lease_expires_at,
         }
         with self._sessions.begin() as session:
             changed = cast(
@@ -160,10 +288,16 @@ class SqlAlchemyAnalysisRepository(AnalysisRepository):
                 raise ConcurrentAnalysisUpdateError(
                     f"Analysis '{job.id}' was modified by another operation."
                 )
+            if job.is_terminal:
+                session.execute(
+                    delete(AnalysisInputRecord).where(
+                        AnalysisInputRecord.job_id == job.id
+                    )
+                )
         return job
 
     def delete_expired(self, before: datetime) -> int:
-        """Delete retained records created before the supplied cutoff."""
+        """Delete jobs created before the cutoff; inputs and outbox rows cascade."""
         with self._sessions.begin() as session:
             result = cast(
                 CursorResult[Any],
@@ -279,6 +413,24 @@ def _decode_outcome(data: dict[str, Any]) -> AnalysisOutcome:
     raise ValueError(msg)
 
 
+def _to_record(job: AnalysisJob) -> AnalysisRecord:
+    return AnalysisRecord(
+        id=job.id,
+        analyzer=job.analyzer,
+        language=job.language,
+        parameters=dict(job.parameters),
+        status=job.status.value,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        completed_at=job.completed_at,
+        result=None if job.result is None else _encode_outcome(job.result),
+        error_code=job.error_code,
+        version=job.version,
+        attempts=job.attempts,
+        lease_expires_at=job.lease_expires_at,
+    )
+
+
 def _to_job(record: AnalysisRecord) -> AnalysisJob:
     return AnalysisJob(
         id=record.id,
@@ -292,4 +444,6 @@ def _to_job(record: AnalysisRecord) -> AnalysisJob:
         error_code=record.error_code,
         version=record.version,
         parameters=record.parameters,
+        attempts=record.attempts,
+        lease_expires_at=record.lease_expires_at,
     )

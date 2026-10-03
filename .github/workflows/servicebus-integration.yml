@@ -1,0 +1,50 @@
+name: Service Bus integration
+
+# Runs the JobPublisher contract against a dedicated Azure Service Bus test
+# namespace. Manually triggered so routine CI never needs Azure credentials.
+# Requires the CODEBREAKERS_TEST_SERVICEBUS_CONNECTION_STRING repository secret
+# scoped to a queue used only by this workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      queue:
+        description: Dedicated test queue (drained by the tests).
+        required: true
+        default: analysis-jobs-test
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servicebus-integration
+  cancel-in-progress: false
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    environment: servicebus-test
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install project
+        run: python -m pip install --upgrade pip && python -m pip install -e '.[dev]'
+
+      - name: Check secret is configured
+        env:
+          CONNECTION: ${{ secrets.CODEBREAKERS_TEST_SERVICEBUS_CONNECTION_STRING }}
+        run: |
+          if [ -z "$CONNECTION" ]; then
+            echo "::error::CODEBREAKERS_TEST_SERVICEBUS_CONNECTION_STRING is not set."
+            exit 1
+          fi
+
+      - name: Run JobPublisher contract against Service Bus
+        env:
+          CODEBREAKERS_TEST_SERVICEBUS_CONNECTION_STRING: ${{ secrets.CODEBREAKERS_TEST_SERVICEBUS_CONNECTION_STRING }}
+          CODEBREAKERS_TEST_SERVICEBUS_QUEUE: ${{ inputs.queue }}
+        run: pytest tests/test_job_publisher_contract.py -m integration -o addopts='' -rs

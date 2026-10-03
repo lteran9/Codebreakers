@@ -47,3 +47,27 @@ class AnalysisNotFoundError(ApplicationError):
 
 class ConcurrentAnalysisUpdateError(ApplicationError):
     """Raised when an analysis job changed since it was read."""
+
+
+class InvalidJobMessageError(ApplicationError):
+    """Raised when a queued job message does not match a supported schema."""
+
+
+class AnalysisExecutionError(ApplicationError):
+    """Base exception for failures reported by an analysis executor."""
+
+    def __init__(self, error_code: str, message: str) -> None:
+        self.error_code = error_code
+        super().__init__(message)
+
+
+class AnalysisBudgetExceededError(AnalysisExecutionError):
+    """Raised when an analysis exceeds its time or memory budget."""
+
+
+class AnalysisRejectedError(AnalysisExecutionError):
+    """Raised when an analysis fails permanently, so retrying cannot help."""
+
+
+class AnalysisInterruptedError(AnalysisExecutionError):
+    """Raised when an analysis stopped unexpectedly and may succeed if retried."""
