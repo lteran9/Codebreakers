@@ -18,6 +18,7 @@ from codebreakers.api.openapi import install_openapi
 from codebreakers.api.problems import problem_responses, register_exception_handlers
 from codebreakers.api.routers import analyses, ciphers, health
 from codebreakers.application.analysis import AnalysisService
+from codebreakers.application.processing import AnalysisExecutor
 from codebreakers.composition import (
     ANALYZER_REGISTRY,
     CIPHER_REGISTRY,
@@ -27,6 +28,13 @@ from codebreakers.infrastructure.persistence.memory import InMemoryAnalysisRepos
 from codebreakers.infrastructure.persistence.postgres import (
     SqlAlchemyAnalysisRepository,
     create_postgres_engine,
+)
+from codebreakers.worker.handler import build_handler
+from codebreakers.worker.inprocess import InProcessRuntime
+from codebreakers.worker.settings import (
+    ConfigurationError,
+    QueueBackend,
+    WorkerSettings,
 )
 
 _DESCRIPTION = (
@@ -48,6 +56,7 @@ class ApiSettings:
             os.environ.get("CODEBREAKERS_ANALYSIS_RETENTION_DAYS", "7")
         )
     )
+    worker: WorkerSettings = field(default_factory=WorkerSettings.from_env)
 
 
 def create_app(
@@ -55,27 +64,54 @@ def create_app(
     *,
     analysis_service: AnalysisService | None = None,
     readiness_checks: Mapping[str, ReadinessCheck] | None = None,
+    executor: AnalysisExecutor | None = None,
 ) -> FastAPI:
-    """Build a configured FastAPI application."""
+    """Build a configured FastAPI application.
+
+    With the ``in-process`` queue backend the application also hosts the
+    outbox relay and a worker thread, so a single process runs jobs end to end.
+    With ``service-bus`` it only records jobs; separate ``codebreakers relay``
+    and ``codebreakers worker`` processes publish and run them. ``executor``
+    overrides how the in-process worker runs analyzers, mainly for tests.
+    Injected analysis services require the ``service-bus`` backend.
+    """
     active = settings or ApiSettings()
     database_url = active.database_url or os.environ.get("CODEBREAKERS_DATABASE_URL")
+    distributed = active.worker.queue_backend is QueueBackend.SERVICE_BUS
+    if distributed and database_url is None:
+        msg = "The service-bus queue backend requires CODEBREAKERS_DATABASE_URL."
+        raise ConfigurationError(msg)
+    if analysis_service is not None and not distributed:
+        msg = "An injected analysis_service requires the service-bus queue backend."
+        raise ConfigurationError(msg)
     engine: Engine | None = None
-    if analysis_service is None and database_url is not None:
-        engine = create_postgres_engine(database_url, pool_pre_ping=True)
-        repository = SqlAlchemyAnalysisRepository(
-            sessionmaker(engine), retention_days=active.analysis_retention_days
-        )
-        configured_service = create_analysis_service(repository)
+    runtime: InProcessRuntime | None = None
+    if analysis_service is not None:
+        configured_service = analysis_service
     else:
-        configured_service = analysis_service or create_analysis_service(
-            InMemoryAnalysisRepository(capacity=active.analysis_capacity)
-        )
+        repository: SqlAlchemyAnalysisRepository | InMemoryAnalysisRepository
+        if database_url is not None:
+            engine = create_postgres_engine(database_url, pool_pre_ping=True)
+            repository = SqlAlchemyAnalysisRepository(
+                sessionmaker(engine), retention_days=active.analysis_retention_days
+            )
+        else:
+            repository = InMemoryAnalysisRepository(capacity=active.analysis_capacity)
+        configured_service = create_analysis_service(repository)
+        if not distributed:
+            runtime = InProcessRuntime(
+                repository, build_handler(repository, active.worker, executor)
+            )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        if runtime is not None:
+            runtime.start()
         try:
             yield
         finally:
+            if runtime is not None:
+                runtime.stop()
             if engine is not None:
                 engine.dispose()
 
@@ -93,10 +129,13 @@ def create_app(
     )
     app.state.analysis_service = configured_service
     app.state.database_engine = engine
+    app.state.job_runtime = runtime
     checks: dict[str, ReadinessCheck] = {
         "cipher_registry": lambda: bool(CIPHER_REGISTRY),
         "analyzer_registry": lambda: bool(ANALYZER_REGISTRY),
     }
+    if runtime is not None:
+        checks["analysis_worker"] = runtime.is_running
     if readiness_checks is not None:
         checks = dict(readiness_checks)
     elif engine is not None:

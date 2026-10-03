@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Protocol
 from uuid import UUID, uuid4
@@ -12,6 +12,7 @@ from codebreakers.application.errors import (
     UnsupportedAnalyzerError,
     UnsupportedLanguageError,
 )
+from codebreakers.application.messaging import AnalysisJobMessage, TraceContext
 from codebreakers.domain.cryptanalysis.analyzers import VigenereAnalysisResult
 from codebreakers.domain.cryptanalysis.models import (
     AnalysisResult,
@@ -46,6 +47,10 @@ _ALLOWED_TRANSITIONS: Mapping[AnalysisStatus, frozenset[AnalysisStatus]] = {
     AnalysisStatus.CANCELLED: frozenset(),
 }
 
+TERMINAL_STATUSES: frozenset[AnalysisStatus] = frozenset(
+    {AnalysisStatus.SUCCEEDED, AnalysisStatus.FAILED, AnalysisStatus.CANCELLED}
+)
+
 
 @dataclass(frozen=True, slots=True)
 class AnalysisJob:
@@ -62,6 +67,52 @@ class AnalysisJob:
     error_code: str | None = None
     version: int = 1
     parameters: Mapping[str, str] = field(default_factory=dict)
+    attempts: int = 0
+    lease_expires_at: datetime | None = None
+
+    @property
+    def is_terminal(self) -> bool:
+        """Return whether the job has reached a final state."""
+        return self.status in TERMINAL_STATUSES
+
+    def is_claimable(self, at: datetime) -> bool:
+        """Return whether a worker may start, or take over, this job at ``at``."""
+        if self.status is AnalysisStatus.PENDING:
+            return True
+        return self.status is AnalysisStatus.RUNNING and (
+            self.lease_expires_at is None or self.lease_expires_at <= at
+        )
+
+    def claim(self, at: datetime, lease: timedelta) -> "AnalysisJob":
+        """Return the job running under a new lease held until ``at + lease``.
+
+        A running job can be reclaimed once its lease lapses, which recovers
+        work abandoned by a worker that stopped mid-analysis.
+        """
+        if not self.is_claimable(at):
+            msg = f"Analysis in status {self.status} is not claimable at {at}."
+            raise ValueError(msg)
+        return replace(
+            self,
+            status=AnalysisStatus.RUNNING,
+            updated_at=at,
+            attempts=self.attempts + 1,
+            lease_expires_at=at + lease,
+            version=self.version + 1,
+        )
+
+    def release(self, at: datetime) -> "AnalysisJob":
+        """Return a running job to pending so another attempt can claim it."""
+        if self.status is not AnalysisStatus.RUNNING:
+            msg = f"Only running analyses can be released, not {self.status}."
+            raise ValueError(msg)
+        return replace(
+            self,
+            status=AnalysisStatus.PENDING,
+            updated_at=at,
+            lease_expires_at=None,
+            version=self.version + 1,
+        )
 
     def transition(
         self,
@@ -75,11 +126,7 @@ class AnalysisJob:
         if status not in _ALLOWED_TRANSITIONS[self.status]:
             msg = f"Cannot transition analysis from {self.status} to {status}."
             raise ValueError(msg)
-        terminal = status in {
-            AnalysisStatus.SUCCEEDED,
-            AnalysisStatus.FAILED,
-            AnalysisStatus.CANCELLED,
-        }
+        terminal = status in TERMINAL_STATUSES
         if status is AnalysisStatus.SUCCEEDED and result is None:
             msg = "A succeeded analysis requires a result."
             raise ValueError(msg)
@@ -93,6 +140,7 @@ class AnalysisJob:
             completed_at=at if terminal else None,
             result=result,
             error_code=error_code,
+            lease_expires_at=None if terminal else self.lease_expires_at,
             version=self.version + 1,
         )
 
@@ -102,6 +150,16 @@ class AnalysisRepository(Protocol):
 
     def add(self, job: AnalysisJob) -> None:
         """Persist a new analysis job."""
+        ...
+
+    def enqueue(
+        self, job: AnalysisJob, source_text: str, message: AnalysisJobMessage
+    ) -> None:
+        """Atomically persist a pending job, its source text, and an outbox entry."""
+        ...
+
+    def get_source_text(self, job_id: UUID) -> str | None:
+        """Return the retained source text of a job that has not finished."""
         ...
 
     def get(self, job_id: UUID) -> AnalysisJob | None:
@@ -117,7 +175,11 @@ class AnalysisRepository(Protocol):
         ...
 
     def update(self, job: AnalysisJob, expected_version: int) -> AnalysisJob:
-        """Replace a job only when its persisted version matches."""
+        """Replace a job only when its persisted version matches.
+
+        Moving a job to a terminal state also deletes its source text in the
+        same transaction.
+        """
         ...
 
     def delete_expired(self, before: datetime) -> int:
@@ -142,53 +204,44 @@ class AnalysisService:
         self._clock = clock
         self._id_factory = id_factory
 
+    def _resolve(
+        self, analyzer: str, language: str
+    ) -> tuple[AnalyzerFactory, LanguageModel]:
+        factory = self._analyzers.get(analyzer)
+        if factory is None:
+            raise UnsupportedAnalyzerError(analyzer, self._analyzers)
+        model = self._languages.get(language)
+        if model is None:
+            raise UnsupportedLanguageError(language, self._languages)
+        return factory, model
+
     def analyze(self, analyzer: str, text: str, language: str) -> AnalysisOutcome:
         """Run an analyzer synchronously and return its outcome."""
-        factory = self._analyzers.get(analyzer)
-        if factory is None:
-            raise UnsupportedAnalyzerError(analyzer, self._analyzers)
-        model = self._languages.get(language)
-        if model is None:
-            raise UnsupportedLanguageError(language, self._languages)
+        factory, model = self._resolve(analyzer, language)
         return factory(model).analyze(text)
 
-    def submit(self, analyzer: str, text: str, language: str) -> AnalysisJob:
-        """Run an analysis while persisting its validated lifecycle transitions."""
-        factory = self._analyzers.get(analyzer)
-        if factory is None:
-            raise UnsupportedAnalyzerError(analyzer, self._analyzers)
-        model = self._languages.get(language)
-        if model is None:
-            raise UnsupportedLanguageError(language, self._languages)
-        created_at = self._clock()
-        pending = AnalysisJob(
+    def submit(
+        self,
+        analyzer: str,
+        text: str,
+        language: str,
+        trace: TraceContext | None = None,
+    ) -> AnalysisJob:
+        """Validate a request and queue it as a pending job for a worker."""
+        self._resolve(analyzer, language)
+        job = AnalysisJob(
             id=self._id_factory(),
             analyzer=analyzer,
             language=language,
             status=AnalysisStatus.PENDING,
-            created_at=created_at,
+            created_at=self._clock(),
             completed_at=None,
             result=None,
             parameters={"language": language},
         )
-        self._repository.add(pending)
-        running = pending.transition(AnalysisStatus.RUNNING, self._clock())
-        self._repository.update(running, expected_version=pending.version)
-        try:
-            outcome = factory(model).analyze(text)
-        except Exception:
-            failed = running.transition(
-                AnalysisStatus.FAILED,
-                self._clock(),
-                error_code="analysis-failed",
-            )
-            self._repository.update(failed, expected_version=running.version)
-            raise
-        succeeded = running.transition(
-            AnalysisStatus.SUCCEEDED, self._clock(), result=outcome
-        )
-        self._repository.update(succeeded, expected_version=running.version)
-        return succeeded
+        message = AnalysisJobMessage(job_id=job.id, trace=trace or TraceContext())
+        self._repository.enqueue(job, text, message)
+        return job
 
     def get(self, job_id: UUID) -> AnalysisJob:
         """Return a previously submitted job."""

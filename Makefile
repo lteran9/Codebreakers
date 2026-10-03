@@ -1,4 +1,4 @@
-.PHONY: install format lint typecheck test integration coverage openapi serve migrate
+.PHONY: install format lint typecheck test integration coverage openapi serve worker relay migrate
 
 install:
 	python -m pip install --upgrade pip
@@ -28,6 +28,12 @@ openapi:
 
 serve:
 	codebreakers serve
+
+worker:
+	codebreakers worker
+
+relay:
+	codebreakers relay
 
 migrate:
 	alembic upgrade head

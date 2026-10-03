@@ -1,6 +1,6 @@
 # ADR 0007: HTTP API Contract
 
-- Status: Accepted
+- Status: Accepted (analysis submission amended by [ADR-0009](ADR-0009-async-analysis-worker.md))
 - Date: 2026-09-30
 
 ## Context
@@ -12,7 +12,7 @@ Phase 4 exposes cipher operations and cryptanalysis over HTTP. The contract must
 - **Versioning:** Public routes live under `/v1`. Health probes (`/health/live`, `/health/ready`) are unversioned because they are an operational contract, not a product one.
 - **Shared behaviour:** Route handlers only translate HTTP data. Cipher routes call `composition.run_cipher` and analysis routes call `AnalysisService`, the same entry points the CLI uses.
 - **Keys as strings:** Cipher keys are sent as strings, like `--key` on the CLI. The homophonic key is a JSON object encoded as a string. Only `alphabet` is exposed from `TransformOptions`, which matches the CLI.
-- **Analysis as a job resource:** `POST /v1/analyses` returns `201 Created` with a `Location` header and a job body (`id`, `status`, timestamps, `result`). Analyses run synchronously for now, so jobs are returned as `succeeded`. The `status` enum already includes `pending`, `running`, and `failed`, so clients built against it keep working once analysis moves to a queue. Jobs are kept in a bounded in-process `InMemoryAnalysisRepository` (default 128 jobs, oldest evicted first) behind the `AnalysisRepository` port until PostgreSQL arrives in Phase 5. Jobs are lost on restart and are not shared between worker processes.
+- **Analysis as a job resource:** *Amended by ADR-0009: submission now returns `202 Accepted` with a `pending` job processed by a worker; the resource shape is unchanged.* Originally, `POST /v1/analyses` returned `201 Created` with a `Location` header and a job body (`id`, `status`, timestamps, `result`). Analyses run synchronously for now, so jobs are returned as `succeeded`. The `status` enum already includes `pending`, `running`, and `failed`, so clients built against it keep working once analysis moves to a queue. Jobs are kept in a bounded in-process `InMemoryAnalysisRepository` (default 128 jobs, oldest evicted first) behind the `AnalysisRepository` port until PostgreSQL arrives in Phase 5. Jobs are lost on restart and are not shared between worker processes.
 - **Result shape:** `result` is a discriminated union on `kind` (`ranked-candidates`, `frequency-report`, `vigenere-key-analysis`). Non-finite scores are serialised as `null`.
 - **Errors:** Every error is an RFC 9457 `application/problem+json` body with a stable `code` extension, a `correlation_id`, and a `type` of `urn:codebreakers:problem:{code}`. Domain and application errors map to 4xx responses (unsupported cipher → 404, unknown analysis → 404, invalid input → 422). Unexpected failures return a generic 500 whose body never includes the exception message.
 - **Correlation IDs:** A well-formed inbound `X-Request-ID` (`[A-Za-z0-9][A-Za-z0-9._-]{0,127}`) is honoured. Otherwise a UUID4 is generated. The ID is echoed on every response, including 413 and 500 responses.

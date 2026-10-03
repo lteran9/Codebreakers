@@ -101,7 +101,8 @@ curl -s -X POST http://127.0.0.1:8000/v1/ciphers/caesar/encrypt \
   -d '{"text": "HELLO WORLD", "key": "3"}'
 # {"cipher":"caesar","operation":"encrypt","result":"KHOOR ZRUOG"}
 
-# Submit an analysis (returns 201 with a Location header), then fetch it
+# Submit an analysis (returns 202 with a pending job and a Location header),
+# then poll it until status is succeeded, failed, or cancelled
 curl -s -i -X POST http://127.0.0.1:8000/v1/analyses \
   -H 'Content-Type: application/json' \
   -d '{"analyzer": "caesar-bruteforce", "text": "WKH TXLFN EURZQ IRA MXPSV RYHU WKH ODCB GRJ"}'
@@ -112,7 +113,32 @@ curl -s http://127.0.0.1:8000/health/live
 curl -s http://127.0.0.1:8000/health/ready
 ```
 
-Errors are RFC 9457 `application/problem+json` bodies with a machine-readable `code` and a `correlation_id` that matches the `X-Request-ID` response header. Request bodies are limited to 64 KiB, text to 20,000 characters, and keys to 4,096 characters. Analysis jobs are stored in memory by default. Set `CODEBREAKERS_DATABASE_URL` to use PostgreSQL, apply schema changes with `make migrate`, and schedule `python -m codebreakers.infrastructure.persistence.retention` daily. Results are retained for seven days by default (`CODEBREAKERS_ANALYSIS_RETENTION_DAYS`); submitted source text is never stored. See [ADR-0007](docs/architecture/ADR-0007-http-api-contract.md) for the HTTP contract and [ADR-0008](docs/architecture/ADR-0008-analysis-persistence.md) for persistence and retention decisions.
+Errors are RFC 9457 `application/problem+json` bodies with a machine-readable `code` and a `correlation_id` that matches the `X-Request-ID` response header. Request bodies are limited to 64 KiB, text to 20,000 characters, and keys to 4,096 characters. Analysis jobs are stored in memory by default. Set `CODEBREAKERS_DATABASE_URL` to use PostgreSQL, apply schema changes with `make migrate`, and schedule `python -m codebreakers.infrastructure.persistence.retention` daily. Results are retained for seven days by default (`CODEBREAKERS_ANALYSIS_RETENTION_DAYS`). Submitted source text is kept only until its job finishes. See [ADR-0007](docs/architecture/ADR-0007-http-api-contract.md) for the HTTP contract and [ADR-0008](docs/architecture/ADR-0008-analysis-persistence.md) for persistence and retention decisions.
+
+### Asynchronous analysis worker
+
+Analyses run outside the request. The API commits the job with a transactional outbox entry, then returns `202 Accepted`. A worker claims the job, runs the analyzer in a child process within its time and memory budget, and records the outcome. Over budget, the job becomes `cancelled`. If the analyzer rejects the input, the job becomes `failed`, with an `error_code` such as `insufficient-text`. This was built ahead of measured demand, as a portfolio demonstration. See [ADR-0009](docs/architecture/ADR-0009-async-analysis-worker.md).
+
+By default (`CODEBREAKERS_ANALYSIS_QUEUE=in-process`), `codebreakers serve` runs the relay and one worker thread in the same process, so no Azure resources are needed. For independently scaled processes on Azure Service Bus:
+
+```bash
+export CODEBREAKERS_ANALYSIS_QUEUE=service-bus
+export CODEBREAKERS_DATABASE_URL=postgresql://…
+export CODEBREAKERS_SERVICEBUS_CONNECTION_STRING='Endpoint=sb://…'
+export CODEBREAKERS_SERVICEBUS_QUEUE=analysis-jobs       # default
+codebreakers serve     # API: records jobs and outbox entries only
+codebreakers relay     # publishes outbox entries (safe to run several)
+codebreakers worker    # consumes jobs (scale horizontally)
+```
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CODEBREAKERS_ANALYSIS_TIME_BUDGET_SECONDS` | `30` | Wall-clock limit per job, including child start-up |
+| `CODEBREAKERS_ANALYSIS_MEMORY_LIMIT_MB` | `1024` | `RLIMIT_AS` for the child process where supported (`0` disables) |
+| `CODEBREAKERS_WORKER_MAX_ATTEMPTS` | `5` | Attempts before a message is dead-lettered |
+| `CODEBREAKERS_WORKER_RETRY_BASE_SECONDS` / `_MAX_SECONDS` | `2` / `60` | Exponential backoff between attempts |
+
+A valid W3C `traceparent` header and the `X-Request-ID` correlation ID are propagated to the worker logs. To inspect, replay, or discard dead-lettered messages, use `codebreakers deadletter list | replay | discard`, as described in the [dead-letter runbook](docs/operations/dead-letter-runbook.md).
 
 The committed contract lives in [docs/api/openapi.json](docs/api/openapi.json). A test fails when the generated schema drifts; review the change and regenerate with `make openapi`.
 
