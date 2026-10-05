@@ -511,20 +511,21 @@ def test_analyzer_rejection_fails_the_job_with_an_error_code(
 
 
 @pytest.mark.unit
-def test_service_bus_backend_requires_a_database(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("backend", [QueueBackend.SERVICE_BUS, QueueBackend.POSTGRES])
+def test_distributed_backends_require_a_database(
+    monkeypatch: pytest.MonkeyPatch, backend: QueueBackend
 ) -> None:
     monkeypatch.delenv("CODEBREAKERS_DATABASE_URL", raising=False)
-    settings = ApiSettings(
-        worker=WorkerSettings(queue_backend=QueueBackend.SERVICE_BUS)
-    )
-    with pytest.raises(ConfigurationError, match="CODEBREAKERS_DATABASE_URL"):
+    settings = ApiSettings(worker=WorkerSettings(queue_backend=backend))
+    with pytest.raises(
+        ConfigurationError, match=f"{backend} .*CODEBREAKERS_DATABASE_URL"
+    ):
         create_app(settings)
 
 
 @pytest.mark.unit
-def test_injected_analysis_service_requires_service_bus() -> None:
-    with pytest.raises(ConfigurationError, match="service-bus queue backend"):
+def test_injected_analysis_service_requires_a_distributed_backend() -> None:
+    with pytest.raises(ConfigurationError, match="distributed queue backend"):
         create_app(analysis_service=create_analysis_service())
 
 

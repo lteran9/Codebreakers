@@ -14,10 +14,12 @@ from codebreakers.application.processing import Action, Decision
 from codebreakers.infrastructure.messaging.servicebus import (
     MESSAGE_SUBJECT,
     ServiceBusJobConsumer,
+    to_service_bus_message,
+)
+from codebreakers.infrastructure.messaging.settlement import (
     message_body,
     settle_dead_letters,
     summarize_dead_letter,
-    to_service_bus_message,
 )
 
 TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"

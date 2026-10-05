@@ -2,7 +2,6 @@
 
 import math
 import time
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -13,7 +12,6 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, inspect, select, text
 from sqlalchemy.orm import Session, sessionmaker
-from testcontainers.postgres import PostgresContainer
 
 from codebreakers.api.app import ApiSettings, create_app
 from codebreakers.application.analysis import AnalysisJob, AnalysisStatus
@@ -36,21 +34,6 @@ def test_generic_postgresql_url_uses_psycopg_driver() -> None:
     engine = create_postgres_engine("postgresql://user:password@localhost/db")
     assert engine.dialect.driver == "psycopg"
     engine.dispose()
-
-
-@pytest.fixture(scope="module")
-def database_engine() -> Iterator[Engine]:
-    """Start PostgreSQL and exercise the migration from an empty schema."""
-    with PostgresContainer("postgres:16-alpine", driver="psycopg") as postgres:
-        engine = create_engine(postgres.get_connection_url(), pool_pre_ping=True)
-        config = Config("alembic.ini")
-        with engine.begin() as connection:
-            config.attributes["connection"] = connection
-            command.upgrade(config, "head")
-            command.downgrade(config, "base")
-            command.upgrade(config, "head")
-        yield engine
-        engine.dispose()
 
 
 @pytest.fixture
@@ -77,9 +60,17 @@ def _job(job_id: int, created_at: datetime) -> AnalysisJob:
 @pytest.mark.integration
 def test_migration_creates_expected_schema(database_engine: Engine) -> None:
     inspector = inspect(database_engine)
-    assert {"analysis_jobs", "analysis_job_inputs", "analysis_outbox"} <= set(
-        inspector.get_table_names()
-    )
+    assert {
+        "analysis_jobs",
+        "analysis_job_inputs",
+        "analysis_outbox",
+        "analysis_job_queue",
+    } <= set(inspector.get_table_names())
+    queue_indexes = {
+        index["name"] for index in inspector.get_indexes("analysis_job_queue")
+    }
+    assert "ix_analysis_job_queue_ready" in queue_indexes
+    assert not inspector.get_foreign_keys("analysis_job_queue")
     job_columns = {column["name"] for column in inspector.get_columns("analysis_jobs")}
     assert {"attempts", "lease_expires_at"} <= job_columns
     input_columns = {

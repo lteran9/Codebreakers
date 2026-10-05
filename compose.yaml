@@ -1,0 +1,123 @@
+# Local production simulation: PostgreSQL, a one-shot migration, the HTTP API,
+# the outbox relay, and the analysis worker, all from one application image.
+#
+#   cp .env.example .env        # optional; every value has a local default
+#   docker compose up --build --wait
+#
+# The PostgreSQL job queue (CODEBREAKERS_ANALYSIS_QUEUE=postgres) stands in for
+# Azure Service Bus so the asynchronous path runs without cloud credentials.
+name: codebreakers
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+x-app: &app
+  <<: *hardening
+  image: codebreakers:local
+  build:
+    context: .
+  tmpfs:
+    - /tmp
+  environment: &app-env
+    CODEBREAKERS_ANALYSIS_QUEUE: postgres
+    CODEBREAKERS_DATABASE_URL: postgresql://codebreakers:${POSTGRES_PASSWORD:-codebreakers-local}@postgres:5432/codebreakers
+    CODEBREAKERS_ANALYSIS_TIME_BUDGET_SECONDS: ${CODEBREAKERS_ANALYSIS_TIME_BUDGET_SECONDS:-30}
+    CODEBREAKERS_ANALYSIS_MEMORY_LIMIT_MB: ${CODEBREAKERS_ANALYSIS_MEMORY_LIMIT_MB:-1024}
+    CODEBREAKERS_WORKER_MAX_ATTEMPTS: ${CODEBREAKERS_WORKER_MAX_ATTEMPTS:-5}
+    CODEBREAKERS_WORKER_RETRY_BASE_SECONDS: ${CODEBREAKERS_WORKER_RETRY_BASE_SECONDS:-2}
+    CODEBREAKERS_WORKER_RETRY_MAX_SECONDS: ${CODEBREAKERS_WORKER_RETRY_MAX_SECONDS:-60}
+    CODEBREAKERS_ANALYSIS_RETENTION_DAYS: ${CODEBREAKERS_ANALYSIS_RETENTION_DAYS:-7}
+  restart: unless-stopped
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
+x-heartbeat: &heartbeat
+  test:
+    - CMD
+    - python
+    - -m
+    - codebreakers.worker.heartbeat
+    - /tmp/codebreakers.heartbeat
+    - --max-age
+    - "120"
+  interval: 10s
+  timeout: 5s
+  retries: 3
+  start_period: 30s
+  start_interval: 1s
+
+services:
+  postgres:
+    <<: *hardening
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    user: "70:70"
+    environment:
+      POSTGRES_USER: codebreakers
+      POSTGRES_DB: codebreakers
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-codebreakers-local}
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql:uid=70,gid=70,mode=0775
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # TCP rather than the socket: the init-time server listens on the socket only.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "codebreakers", "-d", "codebreakers"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+      start_interval: 1s
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    entrypoint: ["alembic"]
+    command: ["upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ["serve", "--host", "0.0.0.0", "--port", "8000", "--graceful-timeout", "10"]
+    ports:
+      - "127.0.0.1:${CODEBREAKERS_API_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+    stop_grace_period: 15s
+
+  relay:
+    <<: *app
+    command: ["relay"]
+    environment:
+      <<: *app-env
+      CODEBREAKERS_HEARTBEAT_FILE: /tmp/codebreakers.heartbeat
+    healthcheck: *heartbeat
+    stop_grace_period: 15s
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    environment:
+      <<: *app-env
+      CODEBREAKERS_HEARTBEAT_FILE: /tmp/codebreakers.heartbeat
+    healthcheck: *heartbeat
+    # Must exceed the analysis time budget so an in-flight job can finish.
+    stop_grace_period: 45s
+
+volumes:
+  postgres-data:

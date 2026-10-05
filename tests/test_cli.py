@@ -274,4 +274,16 @@ def test_serve_runs_uvicorn_factory_on_loopback() -> None:
         host="127.0.0.1",
         port=9000,
         server_header=False,
+        timeout_graceful_shutdown=10,
     )
+
+
+@pytest.mark.unit
+def test_serve_accepts_container_bind_and_graceful_timeout() -> None:
+    with patch("uvicorn.run") as run:
+        result = runner.invoke(
+            app, ["serve", "--host", "0.0.0.0", "--graceful-timeout", "25"]
+        )
+    assert result.exit_code == ExitCode.SUCCESS
+    assert run.call_args.kwargs["host"] == "0.0.0.0"
+    assert run.call_args.kwargs["timeout_graceful_shutdown"] == 25

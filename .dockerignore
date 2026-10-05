@@ -1,0 +1,15 @@
+# Allowlist: the build context contains only what the Dockerfile copies, so
+# local secrets (.env), virtualenvs, caches, and git history never reach it.
+*
+!Dockerfile
+!pyproject.toml
+!README.md
+!LICENSE
+!requirements/build.txt
+!requirements/runtime.txt
+!src/
+!alembic.ini
+!migrations/
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info

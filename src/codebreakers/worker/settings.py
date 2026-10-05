@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
 from enum import StrEnum
+from pathlib import Path
 from typing import Self
 
 from codebreakers.application.processing import ExecutionBudget, RetryPolicy
@@ -17,6 +18,12 @@ class QueueBackend(StrEnum):
 
     IN_PROCESS = "in-process"
     SERVICE_BUS = "service-bus"
+    POSTGRES = "postgres"
+
+    @property
+    def distributed(self) -> bool:
+        """Whether separate relay and worker processes deliver the jobs."""
+        return self is not QueueBackend.IN_PROCESS
 
 
 class ConfigurationError(ValueError):
@@ -39,6 +46,7 @@ class WorkerSettings:
     retention_days: int = 7
     relay_poll_interval: float = 1.0
     relay_batch_size: int = 100
+    heartbeat_file: Path | None = None
 
     def __post_init__(self) -> None:
         if self.retention_days < 1:
@@ -54,6 +62,7 @@ class WorkerSettings:
     def from_env(cls, env: Mapping[str, str] | None = None) -> Self:
         """Read ``CODEBREAKERS_*`` variables, falling back to defaults."""
         source = os.environ if env is None else env
+        heartbeat = source.get("CODEBREAKERS_HEARTBEAT_FILE")
         try:
             memory = int(source.get("CODEBREAKERS_ANALYSIS_MEMORY_LIMIT_MB", "1024"))
             return cls(
@@ -85,6 +94,7 @@ class WorkerSettings:
                 retention_days=int(
                     source.get("CODEBREAKERS_ANALYSIS_RETENTION_DAYS", "7")
                 ),
+                heartbeat_file=Path(heartbeat) if heartbeat else None,
             )
         except ValueError as err:
             raise ConfigurationError(f"Invalid worker configuration: {err}") from err

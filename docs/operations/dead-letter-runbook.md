@@ -12,16 +12,29 @@ Background on retries and leases is in
 | `invalid-message` | Body is not a supported `AnalysisJobMessage` (bad JSON, unknown `schema_version`). | Fix the producer, then **discard**. Replay is refused. |
 | `retries-exhausted` | Transient failures (for example the database or the child process) on every attempt. The `description` holds the last exception type. | Fix the cause, check the job status, then **replay** or **discard**. |
 | `MaxDeliveryCountExceeded` | The broker gave up after repeated abandons or lock losses, usually workers crashing mid-message. | Investigate worker health, then **replay**. |
-| `TTLExpiredException` | The message expired before a worker received it (only if the queue dead-letters on expiry). | **Replay** when workers are healthy. |
+| `TTLExpiredException` | The message expired before a worker received it (Service Bus only, and only if the queue dead-letters on expiry). | **Replay** when workers are healthy. |
 
 Dead-letter entries hold only identifiers and metadata. Job source text stays
 in PostgreSQL and is never printed by these tools.
 
 ## Prerequisites
 
+The commands use the same backend as the worker.
+
+Azure Service Bus (the deployed default for distributed processing):
+
 ```bash
+export CODEBREAKERS_ANALYSIS_QUEUE=service-bus
 export CODEBREAKERS_SERVICEBUS_CONNECTION_STRING='…'   # never commit or log it
 export CODEBREAKERS_SERVICEBUS_QUEUE=analysis-jobs     # default
+```
+
+PostgreSQL queue (the local Docker Compose stack,
+[ADR-0010](../architecture/ADR-0010-containers-local-stack.md)): run the
+commands in a one-off container that already has the stack's configuration:
+
+```bash
+docker compose run --rm --no-deps worker deadletter list
 ```
 
 ## Inspect
@@ -34,6 +47,7 @@ Each line is JSON:
 `sequence_number`, `enqueued_at`, `delivery_count`, `reason`, `description`,
 `job_id`, and `attempt`. `job_id` and `attempt` are `null` when the body
 cannot be decoded. `list` only peeks, so messages are not locked or removed.
+On the PostgreSQL backend, `sequence_number` is the queue row's `id`.
 
 Then check the job each message refers to:
 
@@ -87,3 +101,7 @@ You can also use Service Bus Explorer in the Azure portal: open the queue,
 choose **Dead-letter**, then **Peek** to inspect messages or **Receive** to
 remove them. Prefer the CLI for replay. It restarts the attempt counter and
 validates the schema, which a manual re-send does not.
+
+On the PostgreSQL backend, dead letters are the rows of `analysis_job_queue`
+where `dead_lettered_at IS NOT NULL`. Read them with SQL if needed, but
+replay and discard through the CLI, for the same reasons.

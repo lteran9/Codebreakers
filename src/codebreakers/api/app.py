@@ -31,11 +31,7 @@ from codebreakers.infrastructure.persistence.postgres import (
 )
 from codebreakers.worker.handler import build_handler
 from codebreakers.worker.inprocess import InProcessRuntime
-from codebreakers.worker.settings import (
-    ConfigurationError,
-    QueueBackend,
-    WorkerSettings,
-)
+from codebreakers.worker.settings import ConfigurationError, WorkerSettings
 
 _DESCRIPTION = (
     "Encrypt, decrypt, and analyze text with classical ciphers. These ciphers "
@@ -70,19 +66,20 @@ def create_app(
 
     With the ``in-process`` queue backend the application also hosts the
     outbox relay and a worker thread, so a single process runs jobs end to end.
-    With ``service-bus`` it only records jobs; separate ``codebreakers relay``
-    and ``codebreakers worker`` processes publish and run them. ``executor``
-    overrides how the in-process worker runs analyzers, mainly for tests.
-    Injected analysis services require the ``service-bus`` backend.
+    With ``service-bus`` or ``postgres`` it only records jobs; separate
+    ``codebreakers relay`` and ``codebreakers worker`` processes publish and
+    run them. ``executor`` overrides how the in-process worker runs analyzers,
+    mainly for tests. Injected analysis services require a distributed backend.
     """
     active = settings or ApiSettings()
     database_url = active.database_url or os.environ.get("CODEBREAKERS_DATABASE_URL")
-    distributed = active.worker.queue_backend is QueueBackend.SERVICE_BUS
+    backend = active.worker.queue_backend
+    distributed = backend.distributed
     if distributed and database_url is None:
-        msg = "The service-bus queue backend requires CODEBREAKERS_DATABASE_URL."
+        msg = f"The {backend} queue backend requires CODEBREAKERS_DATABASE_URL."
         raise ConfigurationError(msg)
     if analysis_service is not None and not distributed:
-        msg = "An injected analysis_service requires the service-bus queue backend."
+        msg = "An injected analysis_service requires a distributed queue backend."
         raise ConfigurationError(msg)
     engine: Engine | None = None
     runtime: InProcessRuntime | None = None

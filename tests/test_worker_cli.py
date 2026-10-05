@@ -6,23 +6,32 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 import pytest
+from sqlalchemy.orm import Session, sessionmaker
 from typer.testing import CliRunner
 
 import codebreakers.worker.main as worker_main
 from codebreakers.cli.exit_codes import ExitCode
 from codebreakers.cli.main import app
 from codebreakers.composition import create_analysis_service
-from codebreakers.infrastructure.messaging.servicebus import (
+from codebreakers.infrastructure.messaging.postgres_queue import (
+    MessageLockLostError,
+    PostgresDeadLetterQueue,
+    PostgresQueueMessage,
+    PostgresQueueReceiver,
+)
+from codebreakers.infrastructure.messaging.servicebus import ServiceBusJobConsumer
+from codebreakers.infrastructure.messaging.settlement import (
     DeadLetterReport,
     DeadLetterSummary,
-    ServiceBusJobConsumer,
+    JobConsumer,
 )
 from codebreakers.infrastructure.persistence.memory import InMemoryAnalysisRepository
-from codebreakers.worker.settings import WorkerSettings
+from codebreakers.worker.settings import QueueBackend, WorkerSettings
 
 runner = CliRunner()
 _INSTALL_STOP_SIGNALS = worker_main.install_stop_signals
@@ -269,3 +278,125 @@ def test_stop_signals_set_the_stop_event() -> None:
         for sig, original in previous.items():
             signal.signal(sig, original)
     assert stop.is_set()
+
+
+# --- PostgreSQL queue backend -------------------------------------------------
+
+
+def _postgres_settings(**overrides: Any) -> WorkerSettings:
+    return WorkerSettings(queue_backend=QueueBackend.POSTGRES, **overrides)
+
+
+@pytest.fixture
+def unbound_sessions(monkeypatch: pytest.MonkeyPatch) -> sessionmaker[Session]:
+    sessions: sessionmaker[Session] = sessionmaker()
+
+    @contextmanager
+    def fake_sessions(_settings: WorkerSettings) -> Iterator[sessionmaker[Session]]:
+        yield sessions
+
+    monkeypatch.setattr(worker_main, "_postgres_sessions", fake_sessions)
+    return sessions
+
+
+@pytest.mark.unit
+def test_settings_read_postgres_backend_and_heartbeat_file() -> None:
+    settings = WorkerSettings.from_env(
+        {
+            "CODEBREAKERS_ANALYSIS_QUEUE": "postgres",
+            "CODEBREAKERS_HEARTBEAT_FILE": "/tmp/codebreakers.heartbeat",
+        }
+    )
+    assert settings.queue_backend is QueueBackend.POSTGRES
+    assert settings.queue_backend.distributed
+    assert not QueueBackend.IN_PROCESS.distributed
+    assert settings.heartbeat_file == Path("/tmp/codebreakers.heartbeat")
+    assert WorkerSettings.from_env({}).heartbeat_file is None
+
+
+@pytest.mark.unit
+def test_run_worker_consumes_the_postgres_queue_with_a_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+    unbound_sessions: sessionmaker[Session],
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+
+    def fake_consume(
+        self: JobConsumer, receiver: Any, stop: threading.Event, **kwargs: Any
+    ) -> None:
+        kwargs["heartbeat"]()
+        calls.append((receiver, stop, kwargs["max_wait_time"]))
+
+    monkeypatch.setattr(JobConsumer, "consume", fake_consume)
+    heartbeat = tmp_path / "heartbeat"
+    stop = threading.Event()
+
+    worker_main.run_worker(
+        _postgres_settings(time_budget=timedelta(seconds=20), heartbeat_file=heartbeat),
+        stop,
+    )
+
+    ((receiver, received_stop, max_wait),) = calls
+    assert isinstance(receiver, PostgresQueueReceiver)
+    assert receiver._lock_duration == timedelta(seconds=80)
+    assert received_stop is stop
+    assert max_wait <= 1.0
+    assert heartbeat.exists()
+
+
+@pytest.mark.unit
+def test_run_relay_publishes_to_the_postgres_queue(
+    monkeypatch: pytest.MonkeyPatch,
+    unbound_sessions: sessionmaker[Session],
+    tmp_path: Path,
+) -> None:
+    repository = InMemoryAnalysisRepository()
+    job = create_analysis_service(repository).submit(
+        "caesar-bruteforce", "KHOOR", "english"
+    )
+    stop = threading.Event()
+    published: list[UUID] = []
+
+    class FakePublisher:
+        def __init__(self, sessions: sessionmaker[Session]) -> None:
+            assert sessions is unbound_sessions
+
+        def publish(self, message: Any, delay: timedelta = timedelta(0)) -> None:
+            published.append(message.job_id)
+            stop.set()
+
+    monkeypatch.setattr(worker_main, "_repository", lambda *_args: repository)
+    monkeypatch.setattr(worker_main, "PostgresJobPublisher", FakePublisher)
+    heartbeat = tmp_path / "heartbeat"
+
+    worker_main.run_relay(
+        _postgres_settings(relay_poll_interval=0.01, heartbeat_file=heartbeat), stop
+    )
+
+    assert published == [job.id]
+    assert heartbeat.exists()
+
+
+@pytest.mark.unit
+def test_dead_letter_queue_follows_the_postgres_backend(
+    unbound_sessions: sessionmaker[Session],
+) -> None:
+    with worker_main.dead_letter_queue(_postgres_settings()) as queue:
+        assert isinstance(queue, PostgresDeadLetterQueue)
+
+
+@pytest.mark.unit
+def test_postgres_receiver_validates_limits_and_requires_a_lock() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        PostgresQueueReceiver(sessionmaker(), lock_duration=timedelta(0))
+    with pytest.raises(ValueError, match="positive"):
+        PostgresQueueReceiver(sessionmaker(), max_delivery_count=0)
+    unlocked = PostgresQueueMessage(
+        sequence_number=1,
+        body="{}",
+        enqueued_time_utc=datetime(2026, 10, 1, tzinfo=UTC),
+        delivery_count=1,
+    )
+    with pytest.raises(MessageLockLostError, match="with a lock"):
+        PostgresQueueReceiver(sessionmaker()).complete_message(unlocked)

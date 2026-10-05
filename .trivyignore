@@ -1,0 +1,10 @@
+# Reviewed Trivy findings for the codebreakers image (`make scan`).
+#
+# `make scan` fails on any CRITICAL vulnerability or detected secret that is
+# not listed here. Add an entry only after review, one ID per line, with a
+# comment giving the reason, the reviewer, and a revisit date, for example:
+#
+#   # zlib minizip only; the runtime never links minizip. Reviewed 2026-10-05, revisit 2027-01-05.
+#   CVE-2023-45853
+#
+# Prefer bumping the base image digest (Dependabot proposes these) over ignoring.
