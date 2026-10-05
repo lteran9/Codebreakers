@@ -29,7 +29,7 @@ def test_ruff_pin_matches_pre_commit_hook() -> None:
 
 def _locked_versions(lock_file: Path) -> dict[str, Version]:
     text = lock_file.read_text(encoding="utf-8")
-    pins = re.findall(r"^([A-Za-z0-9_.-]+)==(\S+) \\$", text, flags=re.MULTILINE)
+    pins = re.findall(r"^([A-Za-z0-9_.-]+)==(\S+) [\\]$", text, flags=re.MULTILINE)
     return {canonicalize_name(name): Version(version) for name, version in pins}
 
 
