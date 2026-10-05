@@ -270,26 +270,26 @@ Cipher encryption and decryption should remain stateless.
 
 ### Build
 
-- [ ] Create a multi-stage `Dockerfile` with dependency/build and minimal runtime stages, deterministic installs, an unprivileged user, and no development tools in the final image.
-- [ ] Use one image with separate API and worker startup commands to avoid duplicating dependencies and release versions.
-- [ ] Add `.dockerignore` for Git data, virtual environments, caches, tests where appropriate, secrets, and local artifacts.
-- [ ] Add Docker Compose for API, worker, PostgreSQL, and any local messaging substitute. Include named volumes and health-based startup dependencies.
-- [ ] Add a one-shot migration service or documented migration command rather than running competing migrations in every API replica.
-- [ ] Handle termination signals and configure graceful shutdown for in-flight HTTP requests and worker messages.
-- [ ] Document all environment variables in `.env.example` using fake values.
+- [x] Create a multi-stage `Dockerfile` with dependency/build and minimal runtime stages, deterministic installs, an unprivileged user, and no development tools in the final image.
+- [x] Use one image with separate API and worker startup commands to avoid duplicating dependencies and release versions.
+- [x] Add `.dockerignore` for Git data, virtual environments, caches, tests where appropriate, secrets, and local artifacts.
+- [x] Add Docker Compose for API, worker, PostgreSQL, and any local messaging substitute. Include named volumes and health-based startup dependencies.
+- [x] Add a one-shot migration service or documented migration command rather than running competing migrations in every API replica.
+- [x] Handle termination signals and configure graceful shutdown for in-flight HTTP requests and worker messages.
+- [x] Document all environment variables in `.env.example` using fake values.
 
 ### Verify
 
-- [ ] Build the image from a clean checkout and run it without bind-mounting the source tree.
-- [ ] Run smoke tests against the Compose stack: health, encrypt, submit analysis, worker completion, and result retrieval.
-- [ ] Scan the image with Trivy or an equivalent scanner and generate an SBOM.
-- [ ] Confirm the runtime user is non-root and no credentials exist in image layers or build arguments.
+- [x] Build the image from a clean checkout and run it without bind-mounting the source tree.
+- [x] Run smoke tests against the Compose stack: health, encrypt, submit analysis, worker completion, and result retrieval.
+- [x] Scan the image with Trivy or an equivalent scanner and generate an SBOM.
+- [x] Confirm the runtime user is non-root and no credentials exist in image layers or build arguments.
 
 ### Exit Criteria
 
-- [ ] One documented command starts a production-like local stack.
-- [ ] API and worker containers pass health and graceful-shutdown checks.
-- [ ] Image scanning has no unreviewed critical vulnerabilities.
+- [x] One documented command starts a production-like local stack.
+- [x] API and worker containers pass health and graceful-shutdown checks.
+- [x] Image scanning has no unreviewed critical vulnerabilities.
 
 ## Phase 8: Azure Infrastructure as Code
 
