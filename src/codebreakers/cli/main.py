@@ -28,9 +28,9 @@ from codebreakers.domain.errors import (
 )
 
 if TYPE_CHECKING:
-    from codebreakers.infrastructure.messaging.servicebus import (
+    from codebreakers.infrastructure.messaging.settlement import (
+        DeadLetterQueue,
         DeadLetterReport,
-        ServiceBusDeadLetterQueue,
     )
     from codebreakers.worker.settings import WorkerSettings
 
@@ -180,8 +180,20 @@ def analyze(
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Interface to bind."),
     port: int = typer.Option(8000, "--port", min=1, max=65535, help="Port to bind."),
+    graceful_timeout: int = typer.Option(
+        10,
+        "--graceful-timeout",
+        min=0,
+        help=(
+            "Seconds to let in-flight requests finish after SIGTERM or SIGINT "
+            "before closing remaining connections."
+        ),
+    ),
 ) -> None:
     """Run the HTTP API with Uvicorn.
+
+    On SIGTERM or SIGINT the server stops accepting connections, waits up to
+    --graceful-timeout seconds for in-flight requests, then runs shutdown.
 
     Example:
         codebreakers serve --port 8000
@@ -195,6 +207,7 @@ def serve(
         host=host,
         port=port,
         server_header=False,
+        timeout_graceful_shutdown=graceful_timeout,
     )
 
 
@@ -231,10 +244,12 @@ def _run_until_stopped(
 
 @app.command()
 def worker() -> None:
-    """Run analysis jobs from Azure Service Bus until SIGINT or SIGTERM.
+    """Run queued analysis jobs until SIGINT or SIGTERM.
 
-    Requires CODEBREAKERS_DATABASE_URL and
-    CODEBREAKERS_SERVICEBUS_CONNECTION_STRING.
+    Requires CODEBREAKERS_DATABASE_URL. Reads the PostgreSQL job queue when
+    CODEBREAKERS_ANALYSIS_QUEUE=postgres, otherwise Azure Service Bus via
+    CODEBREAKERS_SERVICEBUS_CONNECTION_STRING. The current job finishes
+    before the process exits.
 
     Example:
         codebreakers worker
@@ -246,8 +261,9 @@ def worker() -> None:
 
 @app.command()
 def relay() -> None:
-    """Publish committed outbox entries to Azure Service Bus until stopped.
+    """Publish committed outbox entries to the job queue until stopped.
 
+    The queue is chosen like the worker's (PostgreSQL or Azure Service Bus).
     Several relays may run at once; rows are claimed with SKIP LOCKED.
 
     Example:
@@ -259,7 +275,7 @@ def relay() -> None:
 
 
 @contextmanager
-def _dead_letters() -> "Iterator[ServiceBusDeadLetterQueue]":
+def _dead_letters() -> "Iterator[DeadLetterQueue]":
     from codebreakers.worker.main import dead_letter_queue
     from codebreakers.worker.settings import ConfigurationError
 

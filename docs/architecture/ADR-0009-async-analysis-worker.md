@@ -4,7 +4,8 @@
 
 Accepted. Amends [ADR-0007](ADR-0007-http-api-contract.md) (status code of
 `POST /v1/analyses`) and [ADR-0008](ADR-0008-analysis-persistence.md) (source
-text retention).
+text retention). [ADR-0010](ADR-0010-containers-local-stack.md) adds the
+`postgres` queue backend used by the local container stack.
 
 ## Context
 
@@ -55,8 +56,9 @@ POST /v1/analyses ──► one DB transaction: job (pending) + input + outbox r
   transition. Rows left behind by a stuck job cascade-delete with the job when
   the retention purge runs.
 - **Ports:** `JobPublisher` and `AnalysisOutbox` live in the application
-  layer. Adapters: `ServiceBusJobPublisher` (Azure Service Bus) and
-  `InProcessJobQueue`. Both pass the shared contract suite in
+  layer. Adapters: `ServiceBusJobPublisher` (Azure Service Bus),
+  `PostgresJobPublisher` (local stack, ADR-0010), and `InProcessJobQueue`.
+  All pass the shared contract suite in
   `tests/test_job_publisher_contract.py`.
 
 ### Worker semantics
@@ -112,13 +114,17 @@ POST /v1/analyses ──► one DB transaction: job (pending) + input + outbox r
 | Process | Command | Needs |
 | --- | --- | --- |
 | API | `codebreakers serve` | PostgreSQL |
-| Relay | `codebreakers relay` | PostgreSQL, Service Bus |
-| Worker | `codebreakers worker` | PostgreSQL, Service Bus |
+| Relay | `codebreakers relay` | PostgreSQL, plus Service Bus unless the backend is `postgres` |
+| Worker | `codebreakers worker` | PostgreSQL, plus Service Bus unless the backend is `postgres` |
 
 Select the backend with `CODEBREAKERS_ANALYSIS_QUEUE`:
 
 - `service-bus`: the API only records jobs, so the API, relay, and worker
   scale and deploy independently. PostgreSQL is required.
+- `postgres`: the same distributed topology, with the queue stored in a
+  PostgreSQL table instead of Service Bus. It has peek-lock semantics, lock
+  tokens, and a dead-letter state. It is used by the Docker Compose stack and
+  integration tests. See [ADR-0010](ADR-0010-containers-local-stack.md).
 - `in-process` (default): the API lifespan hosts the relay and one worker
   thread over an in-memory queue. A single local process, or a test, runs jobs
   end to end without Azure. The in-memory queue does not survive a restart, so

@@ -137,12 +137,38 @@ codebreakers worker    # consumes jobs (scale horizontally)
 | `CODEBREAKERS_ANALYSIS_MEMORY_LIMIT_MB` | `1024` | `RLIMIT_AS` for the child process where supported (`0` disables) |
 | `CODEBREAKERS_WORKER_MAX_ATTEMPTS` | `5` | Attempts before a message is dead-lettered |
 | `CODEBREAKERS_WORKER_RETRY_BASE_SECONDS` / `_MAX_SECONDS` | `2` / `60` | Exponential backoff between attempts |
+| `CODEBREAKERS_HEARTBEAT_FILE` | unset | File the worker and relay touch each loop, for container liveness probes |
+
+`CODEBREAKERS_ANALYSIS_QUEUE=postgres` runs the same API, relay, and worker topology with the queue stored in PostgreSQL instead of Service Bus. The container stack below uses it. Every variable is listed with a fake value in [.env.example](.env.example).
 
 A valid W3C `traceparent` header and the `X-Request-ID` correlation ID are propagated to the worker logs. To inspect, replay, or discard dead-lettered messages, use `codebreakers deadletter list | replay | discard`, as described in the [dead-letter runbook](docs/operations/dead-letter-runbook.md).
 
 The committed contract lives in [docs/api/openapi.json](docs/api/openapi.json). A test fails when the generated schema drifts; review the change and regenerate with `make openapi`.
 
 These are broken classical ciphers. They provide no confidentiality and must never be used to protect real secrets.
+
+## Containers and local stack
+
+One image runs every role: the API by default, plus `relay`, `worker`, `deadletter …`, or `alembic upgrade head` via `--entrypoint alembic`. Start a production-like local stack with a single command. It brings up PostgreSQL, a one-shot migration, the API, the relay, and the worker, and waits until every service is healthy:
+
+```bash
+docker compose up --build --wait     # or: make up
+make smoke                           # health, encrypt, submit analysis, worker completion, result
+make shutdown-check                  # SIGTERM api/relay/worker; assert clean exits
+docker compose down                  # add -v to delete the database volume
+```
+
+The API listens on `http://127.0.0.1:8000`. Copy [.env.example](.env.example) to `.env` to override defaults. Containers run read-only as a non-root user with all capabilities dropped. Image checks:
+
+```bash
+make image          # build codebreakers:local
+make image-check    # non-root user, no pip/dev tools, no credentials in env or history
+make scan           # Trivy: fail on unreviewed CRITICAL vulnerabilities or any secret
+make sbom           # CycloneDX SBOM at build/container/sbom.cdx.json
+make lock           # regenerate hashed requirements/*.txt after dependency changes
+```
+
+`codebreakers serve --graceful-timeout N` sets how long in-flight requests may drain after SIGTERM. See [ADR-0010](docs/architecture/ADR-0010-containers-local-stack.md) for the image, queue substitute, health, and shutdown decisions.
 
 ## Cryptanalysis and benchmarks
 

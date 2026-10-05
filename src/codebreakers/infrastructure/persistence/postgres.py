@@ -24,6 +24,7 @@ from sqlalchemy import (
     exists,
     func,
     select,
+    text,
     update,
 )
 from sqlalchemy.engine import CursorResult, Engine, make_url
@@ -118,6 +119,41 @@ class OutboxRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class JobQueueRecord(Base):
+    """Message in the PostgreSQL job queue, a local stand-in for Service Bus.
+
+    Rows are deliberately not linked to ``analysis_jobs``: like broker
+    messages, they outlive purged jobs and may be undecodable poison messages.
+    """
+
+    __tablename__ = "analysis_job_queue"
+    __table_args__ = (
+        Index(
+            "ix_analysis_job_queue_ready",
+            "available_at",
+            "id",
+            postgresql_where=text("dead_lettered_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    enqueued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    delivery_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    lock_token: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dead_letter_reason: Mapped[str | None] = mapped_column(String(128))
+    dead_letter_description: Mapped[str | None] = mapped_column(Text)
 
 
 class SqlAlchemyAnalysisRepository(AnalysisRepository, AnalysisOutbox):

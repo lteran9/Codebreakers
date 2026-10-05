@@ -1,9 +1,10 @@
 """Shared ``JobPublisher`` contract run against every adapter.
 
 Each adapter is wrapped in a harness that can publish, advance time, and
-receive what a consumer would see. The Service Bus contract also runs against
-a real namespace when ``CODEBREAKERS_TEST_SERVICEBUS_CONNECTION_STRING`` is
-set (see the manually triggered ``servicebus-integration`` workflow).
+receive what a consumer would see. The PostgreSQL queue runs against a
+Testcontainers database. The Service Bus contract also runs against a real
+namespace when ``CODEBREAKERS_TEST_SERVICEBUS_CONNECTION_STRING`` is set (see
+the manually triggered ``servicebus-integration`` workflow).
 """
 
 import os
@@ -15,16 +16,20 @@ from uuid import UUID
 
 import pytest
 from azure.servicebus import ServiceBusClient, ServiceBusMessage
+from sqlalchemy import Engine, text
+from sqlalchemy.orm import sessionmaker
 
 from codebreakers.application.messaging import (
     AnalysisJobMessage,
     JobPublisher,
     TraceContext,
 )
-from codebreakers.infrastructure.messaging.servicebus import (
-    ServiceBusJobPublisher,
-    message_body,
+from codebreakers.infrastructure.messaging.postgres_queue import (
+    PostgresJobPublisher,
+    PostgresQueueReceiver,
 )
+from codebreakers.infrastructure.messaging.servicebus import ServiceBusJobPublisher
+from codebreakers.infrastructure.messaging.settlement import message_body
 from codebreakers.worker.inprocess import InProcessJobQueue
 
 TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
@@ -120,10 +125,33 @@ class RealServiceBusHarness:
         return received
 
 
+class PostgresHarness:
+    delay_unit = timedelta(seconds=1)
+
+    def __init__(self, engine: Engine) -> None:
+        with engine.begin() as connection:
+            connection.execute(text("TRUNCATE analysis_job_queue"))
+        sessions = sessionmaker(engine)
+        self.publisher: JobPublisher = PostgresJobPublisher(sessions)
+        self._receiver = PostgresQueueReceiver(sessions)
+
+    def advance(self, delta: timedelta) -> None:
+        time.sleep(delta.total_seconds() + 0.2)
+
+    def receive_due(self) -> list[AnalysisJobMessage]:
+        received = []
+        while batch := self._receiver.receive_messages(max_message_count=20):
+            for message in batch:
+                received.append(AnalysisJobMessage.from_json(message.body))
+                self._receiver.complete_message(message)
+        return received
+
+
 @pytest.fixture(
     params=[
         pytest.param("in-process", marks=pytest.mark.unit),
         pytest.param("service-bus-fake", marks=pytest.mark.unit),
+        pytest.param("postgres", marks=pytest.mark.integration),
         pytest.param("service-bus", marks=pytest.mark.integration),
     ]
 )
@@ -132,6 +160,8 @@ def harness(request: pytest.FixtureRequest) -> Iterator[PublisherHarness]:
         yield InProcessHarness()
     elif request.param == "service-bus-fake":
         yield FakeServiceBusHarness()
+    elif request.param == "postgres":
+        yield PostgresHarness(request.getfixturevalue("database_engine"))
     else:
         connection = os.environ.get(SERVICEBUS_ENV)
         if not connection:
