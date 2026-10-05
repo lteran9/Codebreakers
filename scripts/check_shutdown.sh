@@ -27,7 +27,7 @@ for service in "${services[@]}"; do
   if [[ "$exit_code" != "0" ]]; then
     echo "FAIL $service exited with $exit_code (137 means it was killed)" >&2
     failed=1
-  elif ! docker compose logs --no-color --since "$since" "$service" | grep -q "$marker"; then
+  elif ! docker compose logs --no-color --since "$since" "$service" | grep -F "$marker" >/dev/null; then
     echo "FAIL $service exited without logging '$marker'" >&2
     failed=1
   else
