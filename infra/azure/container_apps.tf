@@ -11,7 +11,7 @@ locals {
   image              = "${azurerm_container_registry.main.login_server}/codebreakers:${var.image_tag}"
   database_secret    = "database-url"
   api_port           = 8000
-analysis_queue_sql = <<-SQL
+  analysis_queue_sql = <<-SQL
   SELECT COUNT(*)
   FROM analysis_job_queue
   WHERE dead_lettered_at IS NULL
