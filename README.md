@@ -170,6 +170,27 @@ make lock           # regenerate hashed requirements/*.txt after dependency chan
 
 `codebreakers serve --graceful-timeout N` sets how long in-flight requests may drain after SIGTERM. See [ADR-0010](docs/architecture/ADR-0010-containers-local-stack.md) for the image, queue substitute, health, and shutdown decisions.
 
+## Azure deployment
+
+Terraform in [infra/](infra/) provisions an Azure Container Apps environment in `westus3`. It runs the API, relay, and worker from the same Git-SHA-tagged image, with PostgreSQL Flexible Server, Key Vault, Application Insights, and a budget alert. Idle compute scales to zero, and identity-based access covers the registry, secrets, and telemetry. CI checks the infrastructure without Azure credentials:
+
+```bash
+make tf-check       # fmt, validate, terraform test (mock providers, dev + prod), Checkov
+```
+
+Deployment is a reviewed plan followed by a migration job and the smoke test:
+
+```bash
+make tf-init TF_STATE_ACCOUNT=<bootstrap output>
+make azure-image    # az acr build, tagged with the current commit
+make tf-plan        # saved plan: review it
+make tf-apply       # applies exactly the saved plan
+make azure-migrate  # alembic upgrade head as a Container Apps job
+make azure-smoke    # smoke test against the public HTTPS URL
+```
+
+Follow the [Azure runbook](docs/operations/azure-runbook.md) for the one-time state bootstrap, first deployment, scaling checks, and teardown. [ADR-0011](docs/architecture/ADR-0011-terraform.md) covers Terraform and state. [ADR-0012](docs/architecture/ADR-0012-azure-dev-environment.md) covers the deployment diagram, trust boundaries, cost, identities, and the documented substitutions: the PostgreSQL queue instead of Service Bus, and password database auth.
+
 ## Cryptanalysis and benchmarks
 
 Phase 3 adds reusable text statistics, Caesar brute-force ranking, substitution frequency-analysis assistance, Vigenere key-length and candidate ranking, and homophonic token-distribution reports. Analyzer outputs include explicit language or model versions and explainable scores or measurements.

@@ -76,6 +76,10 @@ database the stack already runs:
 The PostgreSQL queue is a local and test substitute. Azure deployments keep
 Service Bus.
 
+> **Amended in Phase 8:** the first Azure environment also uses the PostgreSQL
+> queue, with KEDA `postgresql` scale rules, and defers Service Bus. See
+> [ADR-0012](ADR-0012-azure-dev-environment.md).
+
 ### Startup, health, and shutdown
 
 - **One-shot migration.** The `migrate` service runs `alembic upgrade head`

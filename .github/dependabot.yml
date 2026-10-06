@@ -17,6 +17,14 @@ updates:
     schedule:
       interval: "weekly"
 
+  # Provider versions and lock files for both Terraform stacks.
+  - package-ecosystem: "terraform"
+    directories:
+      - "/infra/bootstrap"
+      - "/infra/azure"
+    schedule:
+      interval: "weekly"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

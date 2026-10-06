@@ -33,3 +33,18 @@ jobs:
 
       - name: Check types
         run: mypy src tests
+
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+
+      # Credential-free: fmt, validate, mock-provider tests, and Checkov.
+      # Plans and applies run only from the reviewed runbook flow.
+      - name: Check Terraform
+        run: make tf-check

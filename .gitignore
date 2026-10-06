@@ -26,6 +26,14 @@ htmlcov/
 .env.*
 !.env.example
 
+# Terraform: provider lock files are committed; state, plans, and local inputs are not
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.auto.tfvars
+crash.log
+
 # Editors and OS
 .vscode/
 .idea/

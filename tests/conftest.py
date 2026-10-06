@@ -1,4 +1,4 @@
-"""Fixtures shared by the PostgreSQL integration suites."""
+"""Shared test fixtures: telemetry isolation and the PostgreSQL integration suites."""
 
 from collections.abc import Iterator
 
@@ -6,6 +6,12 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import Engine, create_engine
+
+
+@pytest.fixture(autouse=True)
+def _no_telemetry_export(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep a developer's Application Insights settings out of test runs."""
+    monkeypatch.delenv("APPLICATIONINSIGHTS_CONNECTION_STRING", raising=False)
 
 
 @pytest.fixture(scope="session")

@@ -287,3 +287,17 @@ def test_serve_accepts_container_bind_and_graceful_timeout() -> None:
     assert result.exit_code == ExitCode.SUCCESS
     assert run.call_args.kwargs["host"] == "0.0.0.0"
     assert run.call_args.kwargs["timeout_graceful_shutdown"] == 25
+
+
+@pytest.mark.unit
+def test_serve_configures_telemetry_before_creating_the_app() -> None:
+    with patch(
+        "codebreakers.infrastructure.telemetry.configure_telemetry",
+        return_value=True,
+    ) as configure:
+        with patch(
+            "uvicorn.run", side_effect=lambda *_a, **_k: configure.assert_called_once()
+        ) as run:
+            result = runner.invoke(app, ["serve"])
+    assert result.exit_code == ExitCode.SUCCESS
+    run.assert_called_once()

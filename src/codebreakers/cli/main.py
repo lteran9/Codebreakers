@@ -200,7 +200,7 @@ def serve(
     """
     import uvicorn  # deferred so cipher commands do not load the server stack
 
-    _configure_logging()
+    _configure_observability()
     uvicorn.run(
         "codebreakers.api:create_app",
         factory=True,
@@ -211,10 +211,14 @@ def serve(
     )
 
 
-def _configure_logging() -> None:
+def _configure_observability() -> None:
+    from codebreakers.infrastructure.telemetry import configure_telemetry
+
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
     )
+    if configure_telemetry():
+        logging.getLogger("codebreakers").info("telemetry_enabled")
 
 
 def _worker_settings() -> "WorkerSettings":
@@ -233,7 +237,7 @@ def _run_until_stopped(
     from codebreakers.worker.settings import ConfigurationError
 
     settings = _worker_settings()
-    _configure_logging()
+    _configure_observability()
     stop = threading.Event()
     install_stop_signals(stop)
     try:

@@ -1,5 +1,7 @@
 .PHONY: install format lint typecheck test integration coverage openapi serve worker relay migrate \
-	lock image image-check up down smoke shutdown-check scan sbom
+	lock image image-check up down smoke shutdown-check scan sbom \
+	tf-fmt tf-validate tf-test tf-scan tf-check tf-init tf-plan tf-apply \
+	azure-image azure-migrate azure-smoke
 
 install:
 	python -m pip install --upgrade pip
@@ -94,3 +96,60 @@ sbom: $(SCAN_DIR)/image.tar
 	@echo "SBOM written to $(SCAN_DIR)/sbom.cdx.json"
 
 FORCE:
+
+# --- Azure infrastructure (see docs/operations/azure-runbook.md) ---
+
+TERRAFORM ?= terraform
+TF_ENV ?= dev
+TF_DIR := infra/azure
+TF_OUTPUT = $(TERRAFORM) -chdir=$(TF_DIR) output -raw
+IMAGE_TAG ?= $(shell git rev-parse HEAD)
+CHECKOV_IMAGE := bridgecrew/checkov:3.3.24@sha256:395ab21f8dc5d457f05001598638a98d142a98e264d610650c084d0ef2e1b4a5
+
+tf-fmt:
+	$(TERRAFORM) fmt -check -recursive infra
+
+tf-validate:
+	for dir in infra/bootstrap $(TF_DIR); do \
+		$(TERRAFORM) -chdir=$$dir init -backend=false -input=false > /dev/null && \
+		$(TERRAFORM) -chdir=$$dir validate || exit 1; \
+	done
+
+# Mock providers: no Azure credentials needed. Checks both environments' inputs.
+tf-test:
+	$(TERRAFORM) -chdir=$(TF_DIR) init -backend=false -input=false > /dev/null
+	$(TERRAFORM) -chdir=$(TF_DIR) test -var-file=environments/dev.tfvars
+	$(TERRAFORM) -chdir=$(TF_DIR) test -var-file=environments/prod.tfvars
+
+tf-scan:
+	docker run --rm -v "$(CURDIR):/src:ro" -w /src $(CHECKOV_IMAGE) \
+		--directory infra --framework terraform --compact --quiet
+
+tf-check: tf-fmt tf-validate tf-test tf-scan
+
+tf-init:
+	@test -n "$(TF_STATE_ACCOUNT)" || \
+		{ echo "Set TF_STATE_ACCOUNT to the bootstrap storage_account_name output."; exit 1; }
+	$(TERRAFORM) -chdir=$(TF_DIR) init -reconfigure \
+		-backend-config=environments/$(TF_ENV).backend.hcl \
+		-backend-config=storage_account_name=$(TF_STATE_ACCOUNT)
+
+# Save the plan for review; tf-apply applies exactly that reviewed plan.
+tf-plan:
+	$(TERRAFORM) -chdir=$(TF_DIR) plan -var-file=environments/$(TF_ENV).tfvars \
+		-var image_tag=$(IMAGE_TAG) -out=$(TF_ENV).tfplan
+
+tf-apply:
+	$(TERRAFORM) -chdir=$(TF_DIR) apply $(TF_ENV).tfplan
+
+# Builds in Azure (linux/amd64) from the clean Git tree; no local Docker push.
+azure-image:
+	@git diff --quiet HEAD || { echo "Commit changes first: the tag is the Git SHA."; exit 1; }
+	az acr build --registry $$($(TF_OUTPUT) container_registry_name) \
+		--image codebreakers:$(IMAGE_TAG) --platform linux/amd64 .
+
+azure-migrate:
+	scripts/run_azure_job.sh $$($(TF_OUTPUT) resource_group_name) $$($(TF_OUTPUT) migration_job_name)
+
+azure-smoke:
+	python scripts/smoke_test.py --base-url $$($(TF_OUTPUT) api_url) --timeout 300
