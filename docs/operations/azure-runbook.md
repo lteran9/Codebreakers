@@ -112,15 +112,23 @@ creates the registry on its own, builds the image, and then applies everything.
 ```bash
 git commit …            # or check out the commit to release
 make azure-image
+terraform -chdir=infra/azure plan \
+  -var-file=environments/dev.tfvars \
+  -var image_tag=$(git rev-parse HEAD) \
+  -target='azurerm_container_app_job.job["migrate"]' \
+  -out=dev-migrate.tfplan
+terraform -chdir=infra/azure apply dev-migrate.tfplan
+make azure-migrate
 make tf-plan            # only the image tag on 3 apps and 2 jobs should change
 make tf-apply
-make azure-migrate      # always safe: alembic is a no-op when up to date
 make azure-smoke
 ```
 
-Run migrations after `tf-apply`, because the migrate job uses the new image.
-Migrations must stay backwards compatible with the previous release, since
-old API revisions keep serving until their replacements are ready (ADR-0010).
+The targeted apply updates only the migration job to the new image, so its
+migrations run before the full apply updates the long-running apps. Replace
+`dev` with `prod` in the plan command when releasing to production. Migrations
+must stay backwards compatible with the previous release, since old API
+revisions keep serving until their replacements are ready (ADR-0010).
 
 ## Verify
 
