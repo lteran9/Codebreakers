@@ -191,6 +191,12 @@ make azure-smoke    # smoke test against the public HTTPS URL
 
 Follow the [Azure runbook](docs/operations/azure-runbook.md) for the one-time state bootstrap, first deployment, scaling checks, and teardown. [ADR-0011](docs/architecture/ADR-0011-terraform.md) covers Terraform and state. [ADR-0012](docs/architecture/ADR-0012-azure-dev-environment.md) covers the deployment diagram, trust boundaries, cost, identities, and the documented substitutions: the PostgreSQL queue instead of Service Bus, and password database auth.
 
+### Terraform security scanning with Checkov
+
+[Checkov](https://www.checkov.io/) is a static analysis tool for infrastructure-as-code. It inspects the Terraform files under `infra/` against security and configuration policies, such as whether resources enable encryption, restrict access, and avoid insecure defaults. It does not deploy resources or require Azure credentials.
+
+`make tf-check` runs Checkov after Terraform formatting, validation, and mock-provider tests. The scan runs in a Docker image pinned to a version and digest, so CI uses the same scanner build each time. A failed policy check fails the target. When a deliberate design choice triggers a check, the relevant Terraform resource documents an inline `#checkov:skip=<id>:<reason>` exception for reviewers to assess.
+
 ## Cryptanalysis and benchmarks
 
 Phase 3 adds reusable text statistics, Caesar brute-force ranking, substitution frequency-analysis assistance, Vigenere key-length and candidate ranking, and homophonic token-distribution reports. Analyzer outputs include explicit language or model versions and explainable scores or measurements.
