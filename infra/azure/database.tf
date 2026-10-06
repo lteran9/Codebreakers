@@ -56,4 +56,8 @@ resource "azurerm_management_lock" "database" {
   scope      = azurerm_postgresql_flexible_server.main.id
   lock_level = "CanNotDelete"
   notes      = "Remove this lock deliberately before destroying the production database."
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
