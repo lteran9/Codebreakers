@@ -29,8 +29,8 @@ variable "image_tag" {
   type        = string
 
   validation {
-    condition     = var.image_tag != "latest" && can(regex("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$", var.image_tag))
-    error_message = "image_tag must be a valid, immutable Docker tag (not latest)."
+    condition     = can(regex("^[0-9a-f]{40}$", var.image_tag))
+    error_message = "image_tag must be a full lowercase Git commit SHA."
   }
 }
 
