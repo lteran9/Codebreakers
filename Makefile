@@ -144,7 +144,10 @@ tf-apply:
 
 # Builds in Azure (linux/amd64) from the clean Git tree; no local Docker push.
 azure-image:
-	@git diff --quiet HEAD || { echo "Commit changes first: the tag is the Git SHA."; exit 1; }
+	@test "$(IMAGE_TAG)" = "$$(git rev-parse HEAD)" || \
+		{ echo "IMAGE_TAG must match the checked-out Git SHA."; exit 1; }
+	@test -z "$$(git status --porcelain)" || \
+		{ echo "Commit changes first: the tag is the Git SHA."; exit 1; }
 	az acr build --registry $$($(TF_OUTPUT) container_registry_name) \
 		--image codebreakers:$(IMAGE_TAG) --platform linux/amd64 .
 
