@@ -132,6 +132,10 @@ resource "azurerm_management_lock" "state" {
   scope      = azurerm_storage_account.state.id
   lock_level = "CanNotDelete"
   notes      = "Holds Terraform state for every Codebreakers environment."
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 output "resource_group_name" {
