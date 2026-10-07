@@ -37,7 +37,7 @@ dev = [
     "pytest-cov>=5.0",
     "testcontainers[postgres]>=4.8",
     # Keep in sync with the ruff-pre-commit rev; formatter output changes between releases.
-    "ruff==0.16.9",
+    "ruff==0.16.10",
 ]
 
 [tool.setuptools.packages.find]
