@@ -21,7 +21,7 @@ in PostgreSQL and is never printed by these tools.
 
 The commands use the same backend as the worker.
 
-Azure Service Bus (the deployed default for distributed processing):
+Azure Service Bus (`CODEBREAKERS_ANALYSIS_QUEUE=service-bus`):
 
 ```bash
 export CODEBREAKERS_ANALYSIS_QUEUE=service-bus
@@ -36,6 +36,11 @@ commands in a one-off container that already has the stack's configuration:
 ```bash
 docker compose run --rm --no-deps worker deadletter list
 ```
+
+PostgreSQL queue in Azure `dev`
+([ADR-0012](../architecture/ADR-0012-azure-dev-environment.md)): the database
+accepts only Azure traffic, so run the commands inside the API container app.
+See the [Azure runbook](azure-runbook.md#operating).
 
 ## Inspect
 

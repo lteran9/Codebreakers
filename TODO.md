@@ -299,40 +299,48 @@ Cipher encryption and decryption should remain stateless.
 
 ### Design
 
-- [ ] Choose one low-cost Azure region and define separate `dev` and `prod` environment inputs; deploy `dev` first.
-- [ ] Record an ADR choosing Terraform, including remote state and provider
+- [x] Choose one low-cost Azure region and define separate `dev` and `prod` environment inputs; deploy `dev` first.
+- [x] Record an ADR choosing Terraform, including remote state and provider
   version strategy.
-- [ ] Draw a deployment diagram and list trust boundaries, public endpoints, and expected monthly cost before provisioning resources.
-- [ ] Decide whether PostgreSQL and Service Bus are required in the first cloud demo. Document cheaper temporary substitutions rather than silently changing architecture.
+- [x] Draw a deployment diagram and list trust boundaries, public endpoints, and expected monthly cost before provisioning resources.
+- [x] Decide whether PostgreSQL and Service Bus are required in the first cloud demo. Document cheaper temporary substitutions rather than silently changing architecture.
+  PostgreSQL is kept and Service Bus is deferred: the PostgreSQL queue runs in `dev` (ADR-0012).
 
 ### Provision with Terraform
 
-- [ ] Create a resource group and Log Analytics workspace.
-- [ ] Create Azure Container Registry and grant pull access through managed identity rather than registry passwords.
-- [ ] Create a Container Apps environment and deploy separate API and worker apps from the same versioned image.
-- [ ] Configure API ingress, revision mode, CPU/memory limits, health probes, minimum/maximum replicas, and HTTP scaling rules.
-- [ ] Configure worker scaling from Service Bus queue depth, including scale to zero where job latency requirements permit it.
-- [ ] Create Azure Database for PostgreSQL Flexible Server, database, network rules, backups, retention, and the smallest suitable development SKU.
+- [x] Create a resource group and Log Analytics workspace.
+- [x] Create Azure Container Registry and grant pull access through managed identity rather than registry passwords.
+- [x] Create a Container Apps environment and deploy separate API and worker apps from the same versioned image.
+- [x] Configure API ingress, revision mode, CPU/memory limits, health probes, minimum/maximum replicas, and HTTP scaling rules.
+- [x] Configure worker scaling from Service Bus queue depth, including scale to zero where job latency requirements permit it.
+  Substituted: KEDA `postgresql` rules on queue and outbox rows scale the worker and relay to zero (ADR-0012).
+- [x] Create Azure Database for PostgreSQL Flexible Server, database, network rules, backups, retention, and the smallest suitable development SKU.
 - [ ] Create a Service Bus namespace, analysis queue, dead-letter policy, retry limits, and message lock settings.
-- [ ] Create Key Vault and store only secrets that cannot use identity-based access. Reference secrets from Container Apps rather than copying them into Terraform outputs.
-- [ ] Create Application Insights and connect API and worker telemetry.
-- [ ] Assign narrowly scoped managed identity roles for ACR pull, Service Bus send/receive, Key Vault read, and telemetry.
-- [ ] Add tags for application, environment, owner, and cost center; configure a budget alert to prevent portfolio infrastructure surprises.
-- [ ] Store Terraform state in an Azure Storage account with locking, encryption, restricted access, and separate state per environment.
+  Deferred: the PostgreSQL queue provides these semantics in `dev`. ADR-0012 records the path back.
+- [x] Create Key Vault and store only secrets that cannot use identity-based access. Reference secrets from Container Apps rather than copying them into Terraform outputs.
+- [x] Create Application Insights and connect API and worker telemetry.
+- [x] Assign narrowly scoped managed identity roles for ACR pull, Service Bus send/receive, Key Vault read, and telemetry.
+  Service Bus roles are not needed while it is deferred. Key Vault read is scoped to the one secret.
+- [x] Add tags for application, environment, owner, and cost center; configure a budget alert to prevent portfolio infrastructure surprises.
+- [x] Store Terraform state in an Azure Storage account with locking, encryption, restricted access, and separate state per environment.
 
 ### Verify
 
-- [ ] Run `terraform fmt`, `validate`, and a security scanner such as Checkov in CI; review every plan before apply.
+- [x] Run `terraform fmt`, `validate`, and a security scanner such as Checkov in CI; review every plan before apply.
+  `make tf-check` also runs mock-provider `terraform test`. `make tf-apply` applies only the saved plan.
 - [ ] Deploy `dev`, execute end-to-end smoke tests, and verify queue-based scaling.
+  Pending a deployment that follows `docs/operations/azure-runbook.md`.
 - [ ] Confirm the API has no database, queue, or registry passwords where managed identity is supported.
+  Registry and telemetry use managed identity. The database password is a documented gap, held as a Key Vault reference (ADR-0012).
 - [ ] Destroy and recreate the development environment from code to prove reproducibility, accounting for stateful data safeguards.
+  Pending deployment. Safeguards: `protect_stateful_resources` adds locks and purge protection in `prod`.
 
 ### Exit Criteria
 
 - [ ] A public HTTPS API completes a queued analysis end to end.
 - [ ] Infrastructure can be reproduced from Terraform plus documented bootstrap
   steps, with no portal-only configuration.
-- [ ] Cost, backup, retention, identity, and teardown decisions are documented.
+- [x] Cost, backup, retention, identity, and teardown decisions are documented.
 
 ## Phase 9: Delivery, Security, and Observability
 
