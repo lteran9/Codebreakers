@@ -12,6 +12,8 @@ use `environments/prod.tfvars`.
   **User Access Administrator**, because Terraform creates role assignments.
 - Azure CLI 2.60+ with the extension: `az extension add --name containerapp --upgrade`.
 - Terraform 1.16+ and Python 3.12+ (for the smoke test).
+- Docker Desktop running, with Docker Buildx available (`docker buildx version`),
+  to build and push images locally without ACR Tasks.
 - Resource providers registered once per subscription:
 
   ```bash
@@ -68,8 +70,9 @@ The container apps need an image in the registry before they can start, and
 the registry is part of the same configuration. The first deployment therefore
 creates the registry on its own, builds the image, and then applies everything.
 
-1. Commit your work. The image tag is the Git SHA, and `make azure-image`
-   refuses a dirty tree.
+1. Commit your work. The image tag is the Git SHA. Check `git status --short`
+   and commit intended source changes before building: a local Docker build
+   does not enforce a clean tree.
 2. Create only the registry and its prerequisites:
 
    ```bash
@@ -79,11 +82,7 @@ creates the registry on its own, builds the image, and then applies everything.
 
    Terraform warns that `-target` is for exceptional use. This is that case,
    and the next step applies the full configuration.
-3. Build the image inside Azure (`linux/amd64`, no local Docker push):
-
-   ```bash
-   make azure-image
-   ```
+3. [Build and push the image locally](#build-and-push-the-image-locally).
 
 4. Plan, review, and apply. `tf-apply` applies only the saved plan:
 
@@ -107,11 +106,40 @@ creates the registry on its own, builds the image, and then applies everything.
    300 s timeout. The timeout allows for cold starts, because the relay and
    worker scale from zero (see step 5 of [Verify](#verify)).
 
-## Releasing a new version
+## Build and push the image locally
+
+Run from the repository root, after the registry has been provisioned. This
+approach does not use ACR Tasks and works on Apple Silicon by targeting the
+`linux/amd64` platform used by Container Apps.
 
 ```bash
-git commit …            # or check out the commit to release
-make azure-image
+ACR=$(terraform -chdir=infra/azure output -raw container_registry_name)
+ACR_HOST=$(terraform -chdir=infra/azure output -raw container_registry_login_server)
+
+az acr login --name "$ACR"
+
+docker buildx build \
+  --platform linux/amd64 \
+  --tag "$ACR_HOST/codebreakers:$(git rev-parse HEAD)" \
+  --push .
+```
+
+Continue only after the push succeeds. Keep the same commit checked out for
+the following Terraform plan so the deployed image tag matches the pushed
+image. Repeat these commands for each release.
+
+`make azure-image` remains an optional alternative for subscriptions that
+support ACR Tasks; it builds inside Azure rather than locally. Do not use it
+when ACR Tasks are unavailable. Neither approach requires registry admin
+credentials: the local push uses your signed-in Azure identity.
+
+## Releasing a new version
+
+Commit or check out the release, then complete
+[Build and push the image locally](#build-and-push-the-image-locally) before
+running:
+
+```bash
 terraform -chdir=infra/azure plan \
   -var-file=environments/dev.tfvars \
   -var image_tag=$(git rev-parse HEAD) \
@@ -230,12 +258,30 @@ terraform -chdir=infra/azure destroy -var-file=environments/dev.tfvars \
 
 ## Troubleshooting
 
+If `make azure-smoke` reports that the API never became ready, inspect the
+API's system and console logs before increasing the timeout:
+
+```bash
+az containerapp logs show -g rg-codebreakers-dev -n ca-codebreakers-dev-api \
+  --type system --tail 30 --follow false
+az containerapp logs show -g rg-codebreakers-dev -n ca-codebreakers-dev-api \
+  --type console --tail 60 --follow false
+```
+
+An `ImportError` mentioning `LogData` indicates an incompatible Azure Monitor
+exporter/OpenTelemetry SDK in the image, not a database or ingress problem.
+Use the corrected runtime lock file, commit the fix, and
+[build and push a new image locally](#build-and-push-the-image-locally).
+Then redeploy with `make tf-plan` and `make tf-apply`.
+`make image-check` checks the real telemetry imports in the runtime image.
+
 | Symptom | Cause and fix |
 |---------|---------------|
 | `403` on `terraform init` or plan | The state account allows Entra auth only. Check `az account show`, and that the bootstrap granted you *Storage Blob Data Contributor*. Role assignments can take a few minutes. |
 | Key Vault secret creation fails with `403 Forbidden` | Deployer RBAC had not propagated within the 60 s wait. Re-run `make tf-plan && make tf-apply`. |
-| A revision is stuck in *Activating*, with `UNAUTHORIZED` pulling the image | The image tag does not exist in the registry (run `make azure-image` for the planned SHA), or AcrPull has not propagated yet (wait, then `az containerapp revision restart`). |
-| `az acr build` fails because ACR Tasks are unavailable (some subscription types) | Build and push locally: `az acr login -n <registry>`, then `docker buildx build --platform linux/amd64 -t <login_server>/codebreakers:$(git rev-parse HEAD) --push .` |
+| A revision is stuck in *Activating*, with `UNAUTHORIZED` pulling the image | Confirm the planned image tag exists using [Build and push the image locally](#build-and-push-the-image-locally). If it exists, check the app identity's AcrPull role and allow propagation time before restarting the revision. |
+| `az acr build` fails because ACR Tasks are unavailable (some subscription types) | Use [Build and push the image locally](#build-and-push-the-image-locally) instead of `make azure-image`. |
+| Local registry login or push is denied | Check the selected subscription and your identity's registry push permissions (AcrPush for a standard RBAC registry). Container Apps' AcrPull role permits pulls only; do not enable registry admin credentials to work around this. |
 | `/health/ready` returns `503` | The database is stopped or migrations have not run (`make azure-migrate`). If the Key Vault secret cannot be read, the revision does not start at all: check `ContainerAppSystemLogs_CL`. |
 | Jobs stay `pending` | Check that the relay and worker scale (Verify, step 5). The scale rules use the same Key Vault-backed database URL, so a broken secret reference shows up in `ContainerAppSystemLogs_CL`. |
 | `LocationIsOfferRestricted` or quota errors for PostgreSQL | Some subscriptions cannot create Flexible Server in every region. Set `location` to another region in `local.auto.tfvars` and apply again. |

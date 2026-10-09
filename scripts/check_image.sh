@@ -30,6 +30,16 @@ else
   fail "pip or development tools are installed"
 fi
 
+if docker run --rm --entrypoint python "$image" -c '
+from azure.monitor.opentelemetry import configure_azure_monitor
+from azure.monitor.opentelemetry.exporter import (
+    AzureMonitorLogExporter, AzureMonitorMetricExporter, AzureMonitorTraceExporter,
+)'; then
+  echo "ok   Azure Monitor telemetry packages import"
+else
+  fail "Azure Monitor telemetry dependencies are incompatible"
+fi
+
 pattern='(password|passwd|secret|token|connection_?string|access_?key|database_url)='
 if docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image" | grep -Eiq "$pattern"; then
   fail "credential-like environment variable baked into the image"

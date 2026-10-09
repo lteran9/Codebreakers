@@ -1,5 +1,7 @@
 """Tests for opt-in Azure Monitor telemetry configuration."""
 
+import subprocess
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -12,6 +14,25 @@ from codebreakers.infrastructure.telemetry import (
 )
 
 _CONNECTION = "InstrumentationKey=00000000-0000-0000-0000-000000000000"
+
+
+@pytest.mark.unit
+def test_real_telemetry_packages_import_in_a_fresh_process() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from azure.monitor.opentelemetry import configure_azure_monitor; "
+            "from azure.monitor.opentelemetry.exporter import "
+            "AzureMonitorLogExporter, AzureMonitorMetricExporter, "
+            "AzureMonitorTraceExporter",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.unit
