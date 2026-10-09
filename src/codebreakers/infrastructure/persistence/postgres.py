@@ -37,7 +37,10 @@ from codebreakers.application.analysis import (
     AnalysisRepository,
     AnalysisStatus,
 )
-from codebreakers.application.errors import ConcurrentAnalysisUpdateError
+from codebreakers.application.errors import (
+    AnalysisCapacityError,
+    ConcurrentAnalysisUpdateError,
+)
 from codebreakers.application.messaging import (
     AnalysisJobMessage,
     AnalysisOutbox,
@@ -55,6 +58,7 @@ from codebreakers.domain.cryptanalysis.models import (
 from codebreakers.infrastructure.telemetry import trace_engine
 
 _NONFINITE_FLOAT_KEY = "__codebreakers_nonfinite_float__"
+_ANALYSIS_CAPACITY_LOCK_KEY = 0x434F444542524541
 
 
 class Base(DeclarativeBase):
@@ -178,10 +182,27 @@ class SqlAlchemyAnalysisRepository(AnalysisRepository, AnalysisOutbox):
             session.add(_to_record(job))
 
     def enqueue(
-        self, job: AnalysisJob, source_text: str, message: AnalysisJobMessage
+        self,
+        job: AnalysisJob,
+        source_text: str,
+        message: AnalysisJobMessage,
+        max_unfinished: int | None = None,
     ) -> None:
         """Insert a pending job, its source text, and its outbox message together."""
         with self._sessions.begin() as session:
+            if max_unfinished is not None:
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(:lock_key)"),
+                    {"lock_key": _ANALYSIS_CAPACITY_LOCK_KEY},
+                )
+                unfinished = [status.value for status in UNFINISHED_STATUSES]
+                count = session.scalar(
+                    select(func.count())
+                    .select_from(AnalysisRecord)
+                    .where(AnalysisRecord.status.in_(unfinished))
+                )
+                if (count or 0) >= max_unfinished:
+                    raise AnalysisCapacityError(max_unfinished)
             session.add(_to_record(job))
             session.flush()
             session.add(

@@ -8,7 +8,6 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 from codebreakers.application.errors import (
-    AnalysisCapacityError,
     AnalysisNotFoundError,
     UnsupportedAnalyzerError,
     UnsupportedLanguageError,
@@ -157,9 +156,17 @@ class AnalysisRepository(Protocol):
         ...
 
     def enqueue(
-        self, job: AnalysisJob, source_text: str, message: AnalysisJobMessage
+        self,
+        job: AnalysisJob,
+        source_text: str,
+        message: AnalysisJobMessage,
+        max_unfinished: int | None = None,
     ) -> None:
-        """Atomically persist a pending job, its source text, and an outbox entry."""
+        """Atomically persist an eligible job, its source text, and an outbox entry.
+
+        When ``max_unfinished`` is set, reject the job if the unfinished-job
+        limit has been reached.
+        """
         ...
 
     def get_source_text(self, job_id: UUID) -> str | None:
@@ -241,17 +248,8 @@ class AnalysisService:
         language: str,
         trace: TraceContext | None = None,
     ) -> AnalysisJob:
-        """Validate a request and queue it as a pending job for a worker.
-
-        The unfinished-job cap is checked before the insert, so concurrent
-        submissions can overshoot it slightly; it bounds backlog, not billing.
-        """
+        """Validate a request and queue it as a pending job for a worker."""
         self._resolve(analyzer, language)
-        if (
-            self._max_unfinished is not None
-            and self._repository.count_unfinished() >= self._max_unfinished
-        ):
-            raise AnalysisCapacityError(self._max_unfinished)
         job = AnalysisJob(
             id=self._id_factory(),
             analyzer=analyzer,
@@ -263,7 +261,9 @@ class AnalysisService:
             parameters={"language": language},
         )
         message = AnalysisJobMessage(job_id=job.id, trace=trace or TraceContext())
-        self._repository.enqueue(job, text, message)
+        self._repository.enqueue(
+            job, text, message, max_unfinished=self._max_unfinished
+        )
         return job
 
     def get(self, job_id: UUID) -> AnalysisJob:

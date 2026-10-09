@@ -2,6 +2,7 @@
 
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -15,7 +16,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from codebreakers.api.app import ApiSettings, create_app
 from codebreakers.application.analysis import AnalysisJob, AnalysisStatus
-from codebreakers.application.errors import ConcurrentAnalysisUpdateError
+from codebreakers.application.errors import (
+    AnalysisCapacityError,
+    ConcurrentAnalysisUpdateError,
+)
 from codebreakers.application.messaging import AnalysisJobMessage, TraceContext
 from codebreakers.domain.cryptanalysis.models import AnalysisResult, Candidate
 from codebreakers.infrastructure.persistence import retention
@@ -220,6 +224,30 @@ def test_enqueue_keeps_input_until_terminal_and_relays_once(
     )
     repository.update(failed, expected_version=released.version)
     assert repository.get_source_text(pending.id) is None
+
+
+@pytest.mark.integration
+def test_concurrent_enqueues_respect_unfinished_job_limit(
+    repository: SqlAlchemyAnalysisRepository,
+) -> None:
+    def enqueue(index: int) -> bool:
+        job = _job(index, FIXED_TIME)
+        try:
+            repository.enqueue(
+                job,
+                "KHOOR",
+                _message(job.id),
+                max_unfinished=4,
+            )
+        except AnalysisCapacityError:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        accepted = list(executor.map(enqueue, range(1, 33)))
+
+    assert sum(accepted) == 4
+    assert repository.count_unfinished() == 4
 
 
 @pytest.mark.integration
