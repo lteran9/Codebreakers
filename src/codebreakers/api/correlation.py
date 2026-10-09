@@ -61,16 +61,16 @@ class CorrelationIdMiddleware:
                     headers.append(REQUEST_ID_HEADER, correlation_id)
             await send(message)
 
-        try:
-            with bind_log_context(correlation_id=correlation_id):
+        with bind_log_context(correlation_id=correlation_id):
+            try:
                 await self.app(scope, receive, send_with_header)
-        finally:
-            logger.info(
-                "request_completed method=%s path=%r status=%d duration_ms=%.1f "
-                "correlation_id=%s",
-                scope["method"],
-                scope["path"],
-                status_code,
-                (time.perf_counter() - started) * 1000,
-                correlation_id,
-            )
+            finally:
+                logger.info(
+                    "request_completed method=%s path=%r status=%d duration_ms=%.1f "
+                    "correlation_id=%s",
+                    scope["method"],
+                    scope["path"],
+                    status_code,
+                    (time.perf_counter() - started) * 1000,
+                    correlation_id,
+                )

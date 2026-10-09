@@ -4,6 +4,7 @@ Submitted text may be a real document someone is studying, so request spans,
 database spans, and logs must describe requests without containing them.
 """
 
+import json
 import time
 
 import pytest
@@ -75,10 +76,15 @@ def test_request_spans_and_logs_exclude_content_keys_and_credentials(
         FastAPIInstrumentor.uninstrument_app(app)
 
     spans = span_exporter.get_finished_spans()
-    exported = "\n".join(span.to_json() for span in spans) + capsys.readouterr().out
+    log_lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    exported = "\n".join(span.to_json() for span in spans) + json.dumps(log_lines)
     assert any(span.name == "POST /v1/analyses" for span in spans)
     assert "trace-me" in exported
     assert '"event": "request_completed"' in exported
+    assert any(
+        line["event"] == "request_completed" and line["correlation_id"] == "trace-me"
+        for line in log_lines
+    )
     assert '"event": "analysis_submitted"' in exported
     assert '"event": "job_processed"' in exported
     for secret in (PLAINTEXT, encrypted, shifted, KEY, TOKEN, "eyJsentinel", COOKIE):
