@@ -178,16 +178,24 @@ Terraform in [infra/](infra/) provisions an Azure Container Apps environment in 
 make tf-check       # fmt, validate, terraform test (mock providers, dev + prod), Checkov
 ```
 
-Deployment is a reviewed plan followed by a migration job and the smoke test:
+For the first deployment, follow the runbook to bootstrap state and create the registry. With Docker Desktop running, build and push locally without ACR Tasks, then review and apply the plan:
 
 ```bash
 make tf-init TF_STATE_ACCOUNT=<bootstrap output>
-make azure-image    # az acr build, tagged with the current commit
+ACR=$(terraform -chdir=infra/azure output -raw container_registry_name)
+ACR_HOST=$(terraform -chdir=infra/azure output -raw container_registry_login_server)
+az acr login --name "$ACR"
+docker buildx build \
+  --platform linux/amd64 \
+  --tag "$ACR_HOST/codebreakers:$(git rev-parse HEAD)" \
+  --push .
 make tf-plan        # saved plan: review it
 make tf-apply       # applies exactly the saved plan
 make azure-migrate  # alembic upgrade head as a Container Apps job
 make azure-smoke    # smoke test against the public HTTPS URL
 ```
+
+Commit intended source changes before building, and keep the same commit checked out through the plan so the image tag matches. `make azure-image` is an optional Azure-side build alternative only when the subscription supports ACR Tasks.
 
 Follow the [Azure runbook](docs/operations/azure-runbook.md) for the one-time state bootstrap, first deployment, scaling checks, and teardown. [ADR-0011](docs/architecture/ADR-0011-terraform.md) covers Terraform and state. [ADR-0012](docs/architecture/ADR-0012-azure-dev-environment.md) covers the deployment diagram, trust boundaries, cost, identities, and the documented substitutions: the PostgreSQL queue instead of Service Bus, and password database auth.
 
