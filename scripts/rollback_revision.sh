@@ -61,23 +61,25 @@ until [[ $(az containerapp revision show -g "$rg" -n "$app" --revision "$target"
   sleep 5
 done
 
+image=$(az containerapp revision show -g "$rg" -n "$app" --revision "$target" \
+  --query 'properties.template.containers[0].image' -o tsv)
+
+if [[ ${SKIP_SMOKE:-0} != "1" ]]; then
+  url="https://$(az containerapp revision show -g "$rg" -n "$app" --revision "$target" \
+    --query properties.fqdn -o tsv)"
+  echo "Smoke-testing $url"
+  python3 "$script_dir/smoke_test.py" --base-url "$url" --timeout 300
+fi
+
 echo "Shifting 100% of API traffic from ${current:-none} to $target"
 az containerapp ingress traffic set -g "$rg" -n "$app" \
   --revision-weight "$target=100" -o none
 
-image=$(az containerapp revision show -g "$rg" -n "$app" --revision "$target" \
-  --query 'properties.template.containers[0].image' -o tsv)
 echo "Realigning worker, relay, and jobs with $image"
 az containerapp update -g "$rg" -n "$AZURE_WORKER_APP" --image "$image" -o none
 az containerapp update -g "$rg" -n "$AZURE_RELAY_APP" --image "$image" -o none
 az containerapp job update -g "$rg" -n "$AZURE_MIGRATE_JOB" --image "$image" -o none
 az containerapp job update -g "$rg" -n "$AZURE_RETENTION_JOB" --image "$image" -o none
-
-if [[ ${SKIP_SMOKE:-0} != "1" ]]; then
-  url="https://$(az containerapp show -g "$rg" -n "$app" \
-    --query properties.configuration.ingress.fqdn -o tsv)"
-  python3 "$script_dir/smoke_test.py" --base-url "$url" --timeout 300
-fi
 
 echo "Rolled back to $target ($image)"
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then

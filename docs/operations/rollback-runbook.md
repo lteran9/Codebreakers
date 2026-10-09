@@ -27,10 +27,11 @@ deploy forward again afterwards.
 2. Reactivates the target if it is inactive and waits until it is
    *Provisioned*. If it does not get there within 5 minutes, traffic stays
    where it was.
-3. Sends 100 % of API traffic to the target.
-4. Sets the worker, relay, migration job, and retention job to the target's
+3. Runs the smoke test against the target revision URL before shifting traffic.
+   Set `SKIP_SMOKE=1` to skip it.
+4. Sends 100 % of API traffic to the target and sets the worker, relay,
+   migration job, and retention job to the target's
    image, so every component runs the same code.
-5. Runs the smoke test against the public URL. Set `SKIP_SMOKE=1` to skip it.
 
 It does **not** reverse database migrations. Releases ship only
 backward-compatible (expand-then-contract) migrations, so the previous code
