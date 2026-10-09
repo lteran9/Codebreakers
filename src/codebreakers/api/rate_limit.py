@@ -125,7 +125,10 @@ class RateLimitMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         path: str = scope.get("path", "")
-        if scope["type"] != "http" or path.startswith(self.exempt_prefix):
+if scope["type"] != "http" or path in {
+            f"{self.exempt_prefix}/live",
+            f"{self.exempt_prefix}/ready",
+        }:
             await self.app(scope, receive, send)
             return
 
