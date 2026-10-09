@@ -113,6 +113,11 @@ class InMemoryAnalysisRepository(AnalysisRepository, AnalysisOutbox):
         with self._lock:
             return len(self._jobs)
 
+    def count_unfinished(self) -> int:
+        """Return the number of pending or running jobs."""
+        with self._lock:
+            return sum(not job.is_terminal for job in self._jobs.values())
+
     def update(self, job: AnalysisJob, expected_version: int) -> AnalysisJob:
         """Update a job if its persisted version still matches."""
         with self._lock:

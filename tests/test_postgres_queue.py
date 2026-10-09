@@ -8,6 +8,9 @@ from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
 from sqlalchemy import Engine, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -20,8 +23,13 @@ from codebreakers.infrastructure.messaging.postgres_queue import (
     PostgresJobPublisher,
     PostgresQueueMessage,
     PostgresQueueReceiver,
+    PostgresQueueStats,
 )
-from codebreakers.infrastructure.persistence.postgres import JobQueueRecord
+from codebreakers.infrastructure.persistence.postgres import (
+    JobQueueRecord,
+    create_postgres_engine,
+)
+from codebreakers.infrastructure.telemetry import QueueStats
 from codebreakers.worker.main import run_relay, run_worker
 from codebreakers.worker.settings import QueueBackend, WorkerSettings
 
@@ -192,6 +200,55 @@ def test_concurrent_receivers_never_share_a_message(
         thread.join(30)
 
     assert sorted(received) == list(range(1, 41))
+
+
+def test_queue_stats_report_depth_oldest_ready_age_and_dead_letters(
+    sessions: sessionmaker[Session],
+) -> None:
+    stats = PostgresQueueStats(sessions)
+    assert stats.read() == QueueStats(0, 0.0, 0)
+
+    publisher = PostgresJobPublisher(sessions)
+    publisher.publish(_message(1))
+    publisher.publish(_message(2), delay=timedelta(hours=1))
+    _dead_letter(sessions, _message(3), MAX_DELIVERY_COUNT_EXCEEDED)
+    with sessions.begin() as session:
+        session.execute(
+            update(JobQueueRecord)
+            .where(JobQueueRecord.dead_lettered_at.is_(None))
+            .where(JobQueueRecord.available_at <= text("now()"))
+            .values(available_at=text("now() - interval '90 seconds'"))
+        )
+
+    current = stats.read()
+    assert (current.depth, current.dead_letters) == (2, 1)
+    # The delayed message is not ready yet, so it does not age the queue.
+    assert 90 <= current.oldest_ready_age_seconds < 120
+
+
+def test_database_spans_name_the_server_without_credentials(
+    database_engine: Engine, span_exporter: InMemorySpanExporter
+) -> None:
+    password = "pw-sentinel-5f3a"
+    with database_engine.begin() as connection:
+        connection.execute(text("DROP ROLE IF EXISTS span_probe"))
+        connection.execute(text(f"CREATE ROLE span_probe LOGIN PASSWORD '{password}'"))
+    url = database_engine.url.set(username="span_probe", password=password)
+    engine = create_postgres_engine(url.render_as_string(hide_password=False))
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT :probe"), {"probe": "value-sentinel"})
+    finally:
+        engine.dispose()
+
+    (span,) = span_exporter.get_finished_spans()
+    assert span.attributes is not None
+    assert span.attributes["db.system"] == "postgresql"
+    assert span.attributes["server.address"] == url.host
+    exported = span.to_json()
+    assert password not in exported
+    assert "span_probe" not in exported
+    assert "value-sentinel" not in exported
 
 
 def test_dead_lettered_message_is_listed_without_its_body(

@@ -13,6 +13,7 @@ from starlette.types import Scope
 
 from codebreakers.api.correlation import REQUEST_ID_HEADER, correlation_id_from_scope
 from codebreakers.application.errors import (
+    AnalysisCapacityError,
     AnalysisNotFoundError,
     UnsupportedAnalyzerError,
     UnsupportedCipherError,
@@ -31,10 +32,14 @@ PROBLEM_SCHEMA_REF = "#/components/schemas/ProblemDetails"
 
 logger = logging.getLogger("codebreakers.api")
 
+# Seconds a client should wait before resubmitting when the job backlog is full.
+CAPACITY_RETRY_AFTER_SECONDS = 30
+
 # Ordered most specific first; the first isinstance match wins.
 _ERROR_MAPPINGS: tuple[tuple[type[CodebreakersError], int, str, str], ...] = (
     (UnsupportedCipherError, 404, "unsupported-cipher", "Unsupported cipher"),
     (AnalysisNotFoundError, 404, "analysis-not-found", "Analysis not found"),
+    (AnalysisCapacityError, 503, "analysis-capacity-exceeded", "Service busy"),
     (UnsupportedAnalyzerError, 422, "unsupported-analyzer", "Unsupported analyzer"),
     (UnsupportedLanguageError, 422, "unsupported-language", "Unsupported language"),
     (AlphabetError, 422, "invalid-alphabet", "Invalid alphabet"),
@@ -131,7 +136,10 @@ def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
 def _handle_codebreakers_error(request: Request, exc: Exception) -> JSONResponse:
     for error_type, status, code, title in _ERROR_MAPPINGS:
         if isinstance(exc, error_type):
-            return problem_response(request.scope, status, code, title, str(exc))
+            response = problem_response(request.scope, status, code, title, str(exc))
+            if isinstance(exc, AnalysisCapacityError):
+                response.headers["Retry-After"] = str(CAPACITY_RETRY_AFTER_SECONDS)
+            return response
     return problem_response(
         request.scope, 422, "invalid-request", "Invalid request", str(exc)
     )

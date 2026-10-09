@@ -25,7 +25,7 @@ CipherName = Annotated[
     ),
 ]
 
-_RESPONSES = problem_responses(404, 413, 422)
+_RESPONSES = problem_responses(404, 413, 422, 429)
 
 
 @router.post(

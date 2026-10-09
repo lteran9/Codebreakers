@@ -16,6 +16,7 @@ from codebreakers.api.dependencies import ReadinessCheck
 from codebreakers.api.limits import RequestSizeLimitMiddleware
 from codebreakers.api.openapi import install_openapi
 from codebreakers.api.problems import problem_responses, register_exception_handlers
+from codebreakers.api.rate_limit import RateLimiter, RateLimitMiddleware
 from codebreakers.api.routers import analyses, ciphers, health
 from codebreakers.application.analysis import AnalysisService
 from codebreakers.application.processing import AnalysisExecutor
@@ -40,9 +41,42 @@ _DESCRIPTION = (
 )
 
 
+_TRUE = frozenset({"1", "true", "yes", "on"})
+_FALSE = frozenset({"0", "false", "no", "off"})
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = -1
+    if value < 0:
+        msg = f"{name} must be a non-negative integer."
+        raise ConfigurationError(msg)
+    return value
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw not in _TRUE | _FALSE:
+        msg = f"{name} must be true or false."
+        raise ConfigurationError(msg)
+    return raw in _TRUE
+
+
 @dataclass(frozen=True, slots=True)
 class ApiSettings:
-    """Runtime limits for the HTTP API."""
+    """Runtime limits for the HTTP API.
+
+    A value of ``0`` disables a rate limit or the unfinished-job cap. Rate
+    limits are per client IP and per replica; ``trusted_proxy_hops`` is the
+    number of reverse proxies whose ``X-Forwarded-For`` entries are trusted.
+    """
 
     max_body_bytes: int = 65_536
     analysis_capacity: int = 128
@@ -51,6 +85,23 @@ class ApiSettings:
         default_factory=lambda: int(
             os.environ.get("CODEBREAKERS_ANALYSIS_RETENTION_DAYS", "7")
         )
+    )
+    rate_limit_per_minute: int = field(
+        default_factory=lambda: _env_int("CODEBREAKERS_RATE_LIMIT_PER_MINUTE", 120)
+    )
+    analysis_submissions_per_minute: int = field(
+        default_factory=lambda: _env_int(
+            "CODEBREAKERS_ANALYSIS_SUBMISSIONS_PER_MINUTE", 10
+        )
+    )
+    trusted_proxy_hops: int = field(
+        default_factory=lambda: _env_int("CODEBREAKERS_TRUSTED_PROXY_HOPS", 0)
+    )
+    max_pending_analyses: int = field(
+        default_factory=lambda: _env_int("CODEBREAKERS_MAX_PENDING_ANALYSES", 100)
+    )
+    analysis_listing_enabled: bool = field(
+        default_factory=lambda: _env_bool("CODEBREAKERS_ANALYSIS_LISTING_ENABLED", True)
     )
     worker: WorkerSettings = field(default_factory=WorkerSettings.from_env)
 
@@ -94,7 +145,9 @@ def create_app(
             )
         else:
             repository = InMemoryAnalysisRepository(capacity=active.analysis_capacity)
-        configured_service = create_analysis_service(repository)
+        configured_service = create_analysis_service(
+            repository, max_unfinished=active.max_pending_analyses or None
+        )
         if not distributed:
             runtime = InProcessRuntime(
                 repository, build_handler(repository, active.worker, executor)
@@ -125,6 +178,7 @@ def create_app(
         ],
     )
     app.state.analysis_service = configured_service
+    app.state.analysis_listing_enabled = active.analysis_listing_enabled
     app.state.database_engine = engine
     app.state.job_runtime = runtime
     checks: dict[str, ReadinessCheck] = {
@@ -155,8 +209,20 @@ def create_app(
     app.include_router(health.router)
 
     register_exception_handlers(app)
-    # Last added runs outermost, so every response gets a correlation ID.
+    # Last added runs outermost, so every response gets a correlation ID and
+    # rate-limited requests are rejected before their bodies are read.
     app.add_middleware(RequestSizeLimitMiddleware, max_body_bytes=active.max_body_bytes)
+    app.add_middleware(
+        RateLimitMiddleware,
+        general=_limiter(active.rate_limit_per_minute),
+        submissions=_limiter(active.analysis_submissions_per_minute),
+        submission_path=app.url_path_for("create_analysis"),
+        trusted_proxy_hops=active.trusted_proxy_hops,
+    )
     app.add_middleware(CorrelationIdMiddleware)
     install_openapi(app)
     return app
+
+
+def _limiter(per_minute: int) -> RateLimiter | None:
+    return RateLimiter(per_minute) if per_minute > 0 else None

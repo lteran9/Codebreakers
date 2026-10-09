@@ -25,6 +25,12 @@ SQL
     CODEBREAKERS_ANALYSIS_RETENTION_DAYS  = tostring(var.analysis_retention_days)
     APPLICATIONINSIGHTS_CONNECTION_STRING = azurerm_application_insights.main.connection_string
     AZURE_CLIENT_ID                       = azurerm_user_assigned_identity.app.client_id
+    CODEBREAKERS_ENVIRONMENT              = var.environment
+    CODEBREAKERS_LOG_FORMAT               = "json"
+    # Envoy appends the client address to X-Forwarded-For; trust only that hop.
+    CODEBREAKERS_TRUSTED_PROXY_HOPS = "1"
+    # Anonymous callers must not enumerate other callers' analyses (threat model).
+    CODEBREAKERS_ANALYSIS_LISTING_ENABLED = "false"
   }
 
   # One image, three long-running roles (ADR-0010). Relay and worker have no
@@ -39,19 +45,23 @@ SQL
       max_replicas = var.api_replicas.max
       grace_period = 15
       ingress      = true
-      scale_query  = null
-      scale_target = null
+      # Each deployment gets a new revision that is smoke-tested before it
+      # receives traffic, and the previous one stays available for rollback.
+      revision_mode = "Multiple"
+      scale_query   = null
+      scale_target  = null
     }
     relay = {
-      args         = ["relay"]
-      cpu          = 0.25
-      memory       = "0.5Gi"
-      min_replicas = 0
-      max_replicas = 1
-      grace_period = 15
-      ingress      = false
-      scale_query  = "SELECT COUNT(*) FROM analysis_outbox"
-      scale_target = 1
+      args          = ["relay"]
+      cpu           = 0.25
+      memory        = "0.5Gi"
+      min_replicas  = 0
+      max_replicas  = 1
+      grace_period  = 15
+      ingress       = false
+      revision_mode = "Single"
+      scale_query   = "SELECT COUNT(*) FROM analysis_outbox"
+      scale_target  = 1
     }
     worker = {
       args         = ["worker"]
@@ -60,10 +70,11 @@ SQL
       min_replicas = var.worker_replicas.min
       max_replicas = var.worker_replicas.max
       # Must exceed the 30 s analysis time budget so an in-flight job finishes.
-      grace_period = 45
-      ingress      = false
-      scale_query  = local.analysis_queue_sql
-      scale_target = var.worker_jobs_per_replica
+      grace_period  = 45
+      ingress       = false
+      revision_mode = "Single"
+      scale_query   = local.analysis_queue_sql
+      scale_target  = var.worker_jobs_per_replica
     }
   }
 
@@ -87,7 +98,8 @@ resource "azurerm_container_app" "app" {
   name                         = "ca-${local.name}-${each.key}"
   container_app_environment_id = azurerm_container_app_environment.main.id
   resource_group_name          = azurerm_resource_group.main.name
-  revision_mode                = "Single"
+  revision_mode                = each.value.revision_mode
+  max_inactive_revisions       = 10
   tags                         = local.tags
 
   identity {
@@ -210,6 +222,17 @@ resource "azurerm_container_app" "app" {
     }
   }
 
+  # Terraform creates the apps with var.image_tag; afterwards the delivery
+  # pipeline owns the running image, revision names, and traffic split
+  # (ADR-0013), so those fields are not reverted on the next apply.
+  lifecycle {
+    ignore_changes = [
+      template[0].container[0].image,
+      template[0].revision_suffix,
+      ingress[0].traffic_weight,
+    ]
+  }
+
   depends_on = [time_sleep.app_rbac_propagation]
 }
 
@@ -282,6 +305,10 @@ resource "azurerm_container_app_job" "job" {
         secret_name = local.database_secret
       }
     }
+  }
+
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
   }
 
   depends_on = [time_sleep.app_rbac_propagation]

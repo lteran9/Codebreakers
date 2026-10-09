@@ -109,11 +109,38 @@ variable "budget_amount" {
 }
 
 variable "budget_contact_emails" {
-  description = "Email addresses notified by budget alerts. Set in a git-ignored *.auto.tfvars file."
+  description = "Email addresses notified by budget and operational alerts. Set in a git-ignored *.auto.tfvars file."
   type        = list(string)
 
   validation {
     condition     = length(var.budget_contact_emails) > 0
     error_message = "Provide at least one budget alert email address."
   }
+}
+
+variable "github_repository" {
+  description = "GitHub owner/name whose workflows may deploy with the delivery identity."
+  type        = string
+  default     = "lteran9/Codebreakers"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
+    error_message = "github_repository must be in owner/name form."
+  }
+}
+
+variable "github_environment" {
+  description = "GitHub deployment environment whose jobs may assume the delivery identity."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_-]+$", var.github_environment))
+    error_message = "github_environment must be a single GitHub environment name."
+  }
+}
+
+variable "postgres_connection_alert_threshold" {
+  description = "Active PostgreSQL connections that trigger an alert; keep below the SKU's max_connections."
+  type        = number
+  default     = 40
 }

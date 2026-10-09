@@ -45,6 +45,16 @@ class AnalysisNotFoundError(ApplicationError):
     """Raised when an analysis job cannot be found."""
 
 
+class AnalysisCapacityError(ApplicationError):
+    """Raised when too many analyses are waiting or running to accept another."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        super().__init__(
+            f"The service is processing its limit of {limit} analyses. Retry later."
+        )
+
+
 class ConcurrentAnalysisUpdateError(ApplicationError):
     """Raised when an analysis job changed since it was read."""
 

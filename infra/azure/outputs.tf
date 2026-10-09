@@ -49,3 +49,20 @@ output "log_analytics_workspace_id" {
   description = "Log Analytics workspace (customer) ID for `az monitor log-analytics query`."
   value       = azurerm_log_analytics_workspace.main.workspace_id
 }
+
+output "github_environment_variables" {
+  description = "Non-secret variables to set on the GitHub environment used by the delivery workflows."
+  value = {
+    AZURE_CLIENT_ID        = azurerm_user_assigned_identity.deploy.client_id
+    AZURE_TENANT_ID        = data.azurerm_client_config.current.tenant_id
+    AZURE_SUBSCRIPTION_ID  = data.azurerm_client_config.current.subscription_id
+    AZURE_RESOURCE_GROUP   = azurerm_resource_group.main.name
+    AZURE_ACR_NAME         = azurerm_container_registry.main.name
+    AZURE_ACR_LOGIN_SERVER = azurerm_container_registry.main.login_server
+    AZURE_API_APP          = azurerm_container_app.app["api"].name
+    AZURE_RELAY_APP        = azurerm_container_app.app["relay"].name
+    AZURE_WORKER_APP       = azurerm_container_app.app["worker"].name
+    AZURE_MIGRATE_JOB      = azurerm_container_app_job.job["migrate"].name
+    AZURE_RETENTION_JOB    = azurerm_container_app_job.job["retention"].name
+  }
+}

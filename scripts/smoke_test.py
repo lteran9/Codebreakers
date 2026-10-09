@@ -18,6 +18,7 @@ from urllib.parse import urljoin
 PLAINTEXT = "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG WHILE THE BAND PLAYS ON"
 SHIFT = "3"
 TERMINAL = {"succeeded", "failed", "cancelled"}
+RATE_LIMIT_RETRIES = 5
 
 
 class SmokeTestError(Exception):
@@ -34,12 +35,19 @@ def _request(
         method=method,
         headers={"Content-Type": "application/json", "Accept": "application/json"},
     )
-    try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.status, dict(response.headers), json.load(response)
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode(errors="replace")
-        raise SmokeTestError(f"{method} {path} -> {error.code}: {detail}") from error
+    for _ in range(RATE_LIMIT_RETRIES):
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.status, dict(response.headers), json.load(response)
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode(errors="replace")
+            if error.code != 429:
+                raise SmokeTestError(
+                    f"{method} {path} -> {error.code}: {detail}"
+                ) from error
+            # The API rate-limits per client; honour its back-off and retry.
+            time.sleep(min(float(error.headers.get("Retry-After") or 1), 30.0))
+    raise SmokeTestError(f"{method} {path} stayed rate-limited")
 
 
 def _expect(condition: bool, message: str) -> None:
@@ -89,7 +97,7 @@ def run(base_url: str, timeout: float) -> None:
     deadline = time.monotonic() + timeout
     while job["status"] not in TERMINAL:
         _expect(time.monotonic() < deadline, f"analysis still {job['status']}")
-        time.sleep(0.5)
+        time.sleep(1)
         _, _, job = _request(base_url, "GET", str(location))
 
     _expect(job["status"] == "succeeded", f"analysis ended as {job['status']}")

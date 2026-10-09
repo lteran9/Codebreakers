@@ -2,6 +2,8 @@
 
 Codebreakers is a Python project for exploring classical ciphers, historical encoded messages, and clean engineering practices. The repository is intentionally structured around a domain-first design so that cipher logic stays independent from CLI, API, and infrastructure concerns.
 
+> **Security notice:** the ciphers here provide **zero confidentiality**. They are broken by design, and this project exists to break them. Never use them to protect real secrets. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). The [threat model](docs/security/threat-model.md) covers the hosted service.
+
 ## Project goals
 
 - Build a small, typed cipher domain with reproducible examples.
@@ -48,6 +50,8 @@ PostgreSQL integration tests use Testcontainers and require Docker:
 ```bash
 make integration
 ```
+
+`make scan-source` runs Trivy over the locked requirements (fail on CRITICAL) and the working tree (fail on any secret), as CI does.
 
 ## Command-line usage
 
@@ -143,6 +147,14 @@ codebreakers worker    # consumes jobs (scale horizontally)
 
 A valid W3C `traceparent` header and the `X-Request-ID` correlation ID are propagated to the worker logs. To inspect, replay, or discard dead-lettered messages, use `codebreakers deadletter list | replay | discard`, as described in the [dead-letter runbook](docs/operations/dead-letter-runbook.md).
 
+### Abuse limits and observability
+
+The API limits each client IP, per replica, to `CODEBREAKERS_RATE_LIMIT_PER_MINUTE` requests (default 120) and `CODEBREAKERS_ANALYSIS_SUBMISSIONS_PER_MINUTE` analysis submissions (default 10). Requests over the limit get `429` with `Retry-After`. Once `CODEBREAKERS_MAX_PENDING_ANALYSES` jobs are unfinished (default 100), new submissions get `503 analysis-capacity-exceeded`. Setting any of these to `0` disables it.
+
+`CODEBREAKERS_TRUSTED_PROXY_HOPS` is the number of reverse proxies whose `X-Forwarded-For` entries are trusted (default `0`; Azure sets `1`). `CODEBREAKERS_ANALYSIS_LISTING_ENABLED=false` turns off `GET /v1/analyses`, which then returns `404`. Azure sets it, so jobs are readable only by their unguessable ID.
+
+Every process logs one JSON object per line, tagged with service, environment, version, revision, and correlation and job IDs. `CODEBREAKERS_LOG_FORMAT=text` gives readable lines, and `CODEBREAKERS_LOG_LEVEL` sets the level. Logs never contain submitted text, results, or keys; a test enforces this. When Application Insights is configured, OpenTelemetry traces follow a request through the relay and the worker, and the worker exports job and queue metrics. See [ADR-0014](docs/architecture/ADR-0014-observability.md).
+
 The committed contract lives in [docs/api/openapi.json](docs/api/openapi.json). A test fails when the generated schema drifts; review the change and regenerate with `make openapi`.
 
 These are broken classical ciphers. They provide no confidentiality and must never be used to protect real secrets.
@@ -157,6 +169,8 @@ make smoke                           # health, encrypt, submit analysis, worker 
 make shutdown-check                  # SIGTERM api/relay/worker; assert clean exits
 docker compose down                  # add -v to delete the database volume
 ```
+
+The database volume is `postgres18-data`, mounted at `/var/lib/postgresql` as the PostgreSQL 18 image requires. A `codebreakers_postgres-data` volume left over from older versions holds PostgreSQL 16 data that version 18 cannot read. Remove it with `docker volume rm codebreakers_postgres-data` once you no longer need it.
 
 The API listens on `http://127.0.0.1:8000`. Copy [.env.example](.env.example) to `.env` to override defaults. Containers run read-only as a non-root user with all capabilities dropped. Image checks:
 
@@ -197,7 +211,17 @@ make azure-smoke    # smoke test against the public HTTPS URL
 
 Commit intended source changes before building, and keep the same commit checked out through the plan so the image tag matches. `make azure-image` is an optional Azure-side build alternative only when the subscription supports ACR Tasks.
 
-Follow the [Azure runbook](docs/operations/azure-runbook.md) for the one-time state bootstrap, first deployment, scaling checks, and teardown. [ADR-0011](docs/architecture/ADR-0011-terraform.md) covers Terraform and state. [ADR-0012](docs/architecture/ADR-0012-azure-dev-environment.md) covers the deployment diagram, trust boundaries, cost, identities, and the documented substitutions: the PostgreSQL queue instead of Service Bus, and password database auth.
+After the first deployment, GitHub Actions releases the application ([ADR-0013](docs/architecture/ADR-0013-continuous-delivery.md)):
+
+- A push to `master` runs CI, pushes the tested image with a provenance attestation, and runs migrations. It then creates a new API revision with no traffic, smoke-tests it, and shifts traffic to it.
+- A `v*` tag publishes a GitHub release with the image, SBOM, and attestations, then deploys to `production` after approval.
+- Workflows sign in to Azure through OIDC, with one identity per GitHub environment, and no stored secrets.
+- Terraform owns the infrastructure but ignores images and traffic.
+- `make azure-deploy IMAGE_TAG=<sha>` and `make azure-rollback [ROLLBACK_TO=<revision>]` run the same scripts from a workstation.
+
+Operational alerts (API 5xx responses, restarts, database saturation, dead letters, queue age) email the budget contacts. Each links to the [alerts runbook](docs/operations/alerts.md). Further runbooks cover [rollback](docs/operations/rollback-runbook.md), [database restore](docs/operations/database-restore-runbook.md), and [credential compromise](docs/operations/credential-compromise-runbook.md).
+
+Follow the [Azure runbook](docs/operations/azure-runbook.md) for the one-time state bootstrap, first deployment, connecting GitHub Actions, scaling checks, and teardown. [ADR-0011](docs/architecture/ADR-0011-terraform.md) covers Terraform and state. [ADR-0012](docs/architecture/ADR-0012-azure-dev-environment.md) covers the deployment diagram, trust boundaries, cost, identities, and the documented substitutions: the PostgreSQL queue instead of Service Bus, and password database auth.
 
 ### Terraform security scanning with Checkov
 

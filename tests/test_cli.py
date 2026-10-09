@@ -275,6 +275,8 @@ def test_serve_runs_uvicorn_factory_on_loopback() -> None:
         port=9000,
         server_header=False,
         timeout_graceful_shutdown=10,
+        log_config=None,
+        access_log=False,
     )
 
 

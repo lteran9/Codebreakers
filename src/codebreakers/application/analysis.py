@@ -8,6 +8,7 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 from codebreakers.application.errors import (
+    AnalysisCapacityError,
     AnalysisNotFoundError,
     UnsupportedAnalyzerError,
     UnsupportedLanguageError,
@@ -49,6 +50,9 @@ _ALLOWED_TRANSITIONS: Mapping[AnalysisStatus, frozenset[AnalysisStatus]] = {
 
 TERMINAL_STATUSES: frozenset[AnalysisStatus] = frozenset(
     {AnalysisStatus.SUCCEEDED, AnalysisStatus.FAILED, AnalysisStatus.CANCELLED}
+)
+UNFINISHED_STATUSES: frozenset[AnalysisStatus] = (
+    frozenset(AnalysisStatus) - TERMINAL_STATUSES
 )
 
 
@@ -174,6 +178,10 @@ class AnalysisRepository(Protocol):
         """Return the number of retained jobs."""
         ...
 
+    def count_unfinished(self) -> int:
+        """Return the number of pending or running jobs."""
+        ...
+
     def update(self, job: AnalysisJob, expected_version: int) -> AnalysisJob:
         """Replace a job only when its persisted version matches.
 
@@ -197,12 +205,18 @@ class AnalysisService:
         repository: AnalysisRepository,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         id_factory: Callable[[], UUID] = uuid4,
+        max_unfinished: int | None = None,
     ) -> None:
+        """``max_unfinished`` caps pending and running jobs; ``None`` is no cap."""
+        if max_unfinished is not None and max_unfinished < 1:
+            msg = "max_unfinished must be at least 1."
+            raise ValueError(msg)
         self._analyzers = analyzers
         self._languages = languages
         self._repository = repository
         self._clock = clock
         self._id_factory = id_factory
+        self._max_unfinished = max_unfinished
 
     def _resolve(
         self, analyzer: str, language: str
@@ -227,8 +241,17 @@ class AnalysisService:
         language: str,
         trace: TraceContext | None = None,
     ) -> AnalysisJob:
-        """Validate a request and queue it as a pending job for a worker."""
+        """Validate a request and queue it as a pending job for a worker.
+
+        The unfinished-job cap is checked before the insert, so concurrent
+        submissions can overshoot it slightly; it bounds backlog, not billing.
+        """
         self._resolve(analyzer, language)
+        if (
+            self._max_unfinished is not None
+            and self._repository.count_unfinished() >= self._max_unfinished
+        ):
+            raise AnalysisCapacityError(self._max_unfinished)
         job = AnalysisJob(
             id=self._id_factory(),
             analyzer=analyzer,

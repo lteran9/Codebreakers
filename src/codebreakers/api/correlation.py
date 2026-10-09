@@ -8,6 +8,8 @@ from uuid import uuid4
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from codebreakers.infrastructure.structured_logging import bind_log_context
+
 REQUEST_ID_HEADER = "X-Request-ID"
 _VALID_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -60,7 +62,8 @@ class CorrelationIdMiddleware:
             await send(message)
 
         try:
-            await self.app(scope, receive, send_with_header)
+            with bind_log_context(correlation_id=correlation_id):
+                await self.app(scope, receive, send_with_header)
         finally:
             logger.info(
                 "request_completed method=%s path=%r status=%d duration_ms=%.1f "

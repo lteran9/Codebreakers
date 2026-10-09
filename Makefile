@@ -1,7 +1,7 @@
 .PHONY: install format lint typecheck test integration coverage openapi serve worker relay migrate \
-	lock image image-check up down smoke shutdown-check scan sbom \
+	lock image image-check up down smoke shutdown-check scan sbom scan-source \
 	tf-fmt tf-validate tf-test tf-scan tf-check tf-init tf-plan tf-apply \
-	azure-image azure-migrate azure-smoke
+	azure-image azure-migrate azure-smoke azure-deploy azure-rollback
 
 install:
 	python -m pip install --upgrade pip
@@ -44,6 +44,7 @@ migrate:
 # --- Containers (see docs/architecture/ADR-0010-containers-local-stack.md) ---
 
 IMAGE ?= codebreakers:local
+REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 PYTHON_IMAGE := $(shell sed -n 's/^ARG PYTHON_IMAGE=//p' Dockerfile)
 TRIVY_IMAGE := aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
 SCAN_DIR := build/container
@@ -60,7 +61,7 @@ lock:
 			--output-file requirements/build.txt requirements/build.in'
 
 image:
-	docker build --tag $(IMAGE) .
+	docker build --build-arg CODEBREAKERS_REVISION=$(REVISION) --tag $(IMAGE) .
 
 image-check:
 	scripts/check_image.sh $(IMAGE)
@@ -94,6 +95,25 @@ sbom: $(SCAN_DIR)/image.tar
 	$(TRIVY) image --quiet --input /work/image.tar --format cyclonedx \
 		--output /work/sbom.cdx.json
 	@echo "SBOM written to $(SCAN_DIR)/sbom.cdx.json"
+
+# Locked Python dependencies (vulnerabilities) and the working tree (secrets),
+# before any image exists. Same policy as `scan`: report HIGH, fail CRITICAL.
+SOURCE_SKIP_DIRS := --skip-dirs /src/.venv --skip-dirs /src/build \
+	--skip-dirs /src/.mypy_cache --skip-dirs /src/.ruff_cache \
+	--skip-dirs /src/infra/azure/.terraform --skip-dirs /src/infra/bootstrap/.terraform
+# Git-ignored local secrets (see .gitignore); CI checkouts never contain them.
+SOURCE_SKIP_FILES := --skip-files '**/*.tfstate' --skip-files '**/*.tfstate.*' \
+	--skip-files '**/*.tfplan' --skip-files '**/*.auto.tfvars' \
+	--skip-files /src/.env --skip-files '/src/.env.*'
+
+scan-source:
+	mkdir -p $(SCAN_DIR)
+	$(TRIVY) fs --quiet --scanners vuln --file-patterns 'pip:.*\.txt' \
+		--severity HIGH,CRITICAL --exit-code 0 /src/requirements
+	$(TRIVY) fs --quiet --scanners vuln --file-patterns 'pip:.*\.txt' \
+		--ignorefile /src/.trivyignore --severity CRITICAL --exit-code 1 /src/requirements
+	$(TRIVY) fs --quiet --scanners secret --ignorefile /src/.trivyignore \
+		$(SOURCE_SKIP_DIRS) $(SOURCE_SKIP_FILES) --exit-code 1 /src
 
 FORCE:
 
@@ -149,10 +169,23 @@ azure-image:
 	@test -z "$$(git status --porcelain)" || \
 		{ echo "Commit changes first: the tag is the Git SHA."; exit 1; }
 	az acr build --registry $$($(TF_OUTPUT) container_registry_name) \
-		--image codebreakers:$(IMAGE_TAG) --platform linux/amd64 .
+		--image codebreakers:$(IMAGE_TAG) --platform linux/amd64 \
+		--build-arg CODEBREAKERS_REVISION=$(IMAGE_TAG) .
 
 azure-migrate:
 	scripts/run_azure_job.sh $$($(TF_OUTPUT) resource_group_name) $$($(TF_OUTPUT) migration_job_name)
 
 azure-smoke:
 	python scripts/smoke_test.py --base-url $$($(TF_OUTPUT) api_url) --timeout 300
+
+# The same staged rollout and rollback that GitHub Actions runs (ADR-0013),
+# reading resource names from the Terraform output.
+AZURE_ENV = eval "$$($(TERRAFORM) -chdir=$(TF_DIR) output -json github_environment_variables | \
+	python3 -c 'import json, shlex, sys; [print(f"export {k}={shlex.quote(v)}") for k, v in json.load(sys.stdin).items()]')"
+
+azure-deploy:
+	$(AZURE_ENV) && scripts/deploy_revision.sh "$$AZURE_ACR_LOGIN_SERVER/codebreakers:$(IMAGE_TAG)"
+
+# ROLLBACK_TO names a revision; empty means the one before the serving revision.
+azure-rollback:
+	$(AZURE_ENV) && scripts/rollback_revision.sh $(ROLLBACK_TO)

@@ -1,21 +1,38 @@
 version: 2
+
+# Every ecosystem waits a week before proposing a new release (`cooldown`), so
+# a compromised or yanked version is usually caught upstream before it reaches
+# a pull request. Each update still has to pass CI, including the dependency,
+# secret, and image scans. Security updates are not delayed.
 updates:
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      # Released in lockstep; mixed versions fail to import together.
+      opentelemetry:
+        patterns:
+          - "opentelemetry-*"
+          - "azure-monitor-opentelemetry*"
 
   # Base image digests in the Dockerfile (python:3.12-slim-trixie).
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
 
   # Pinned service images in compose.yaml (postgres).
   - package-ecosystem: "docker-compose"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
 
   # Provider versions and lock files for both Terraform stacks.
   - package-ecosystem: "terraform"
@@ -24,8 +41,14 @@ updates:
       - "/infra/azure"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
 
+  # Actions are pinned by commit SHA; Dependabot updates the SHA and the
+  # trailing version comment together.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7

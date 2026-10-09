@@ -350,41 +350,49 @@ Cipher encryption and decryption should remain stateless.
 
 ### Continuous Delivery
 
-- [ ] Build images in GitHub Actions using immutable Git SHA tags; never deploy `latest` as the release identity.
-- [ ] Cache dependencies and Docker layers without weakening reproducibility.
-- [ ] Run unit, property, integration, migration, container smoke, dependency, secret, IaC, and image scans at appropriate workflow stages.
-- [ ] Authenticate GitHub Actions to Azure using OpenID Connect federation, not a long-lived service-principal secret.
-- [ ] Push to ACR, deploy a new Container Apps revision, run smoke tests, and only then shift traffic.
-- [ ] Protect production with a GitHub environment, required review, and a clear rollback command to the previous healthy revision.
-- [ ] Publish release notes and attach an SBOM and provenance where practical.
+- [x] Build images in GitHub Actions using immutable Git SHA tags; never deploy `latest` as the release identity.
+- [x] Cache dependencies and Docker layers without weakening reproducibility.
+- [x] Run unit, property, integration, migration, container smoke, dependency, secret, IaC, and image scans at appropriate workflow stages.
+- [x] Authenticate GitHub Actions to Azure using OpenID Connect federation, not a long-lived service-principal secret.
+- [x] Push to ACR, deploy a new Container Apps revision, run smoke tests, and only then shift traffic.
+- [x] Protect production with a GitHub environment, required review, and a clear rollback command to the previous healthy revision.
+  *`production` is gated in `release.yml`; the reviewers are configured in GitHub settings (azure-runbook step 4). Prod is not provisioned, so the job skips after approval.*
+- [x] Publish release notes and attach an SBOM and provenance where practical.
 
 ### Observability
 
-- [ ] Emit structured JSON logs with timestamp, level, service, environment, version, correlation ID, job ID, and event name.
-- [ ] Add OpenTelemetry traces across FastAPI, SQLAlchemy, Service Bus publishing, and worker consumption.
-- [ ] Record RED metrics for the API and job throughput, duration, failure, retries, dead-letter count, and queue age for workers.
-- [ ] Create an Azure dashboard or workbook for API health and job processing.
-- [ ] Add alerts for sustained server errors, unhealthy revisions, dead-lettered messages, old queued jobs, and PostgreSQL capacity.
-- [ ] Verify telemetry excludes plaintext, ciphertext, keys, database URLs, authorization headers, and secret values.
-- [ ] Write a runbook for each alert, plus deployment rollback, queue backlog, dead-letter recovery, database restore, and credential compromise.
+- [x] Emit structured JSON logs with timestamp, level, service, environment, version, correlation ID, job ID, and event name.
+- [x] Add OpenTelemetry traces across FastAPI, SQLAlchemy, Service Bus publishing, and worker consumption.
+  *SQLAlchemy spans come from a small `trace_engine` listener because `opentelemetry-instrumentation-sqlalchemy` does not support SQLAlchemy 2.1 yet (ADR-0014).*
+- [x] Record RED metrics for the API and job throughput, duration, failure, retries, dead-letter count, and queue age for workers.
+- [x] Create an Azure dashboard or workbook for API health and job processing.
+- [x] Add alerts for sustained server errors, unhealthy revisions, dead-lettered messages, old queued jobs, and PostgreSQL capacity.
+- [x] Verify telemetry excludes plaintext, ciphertext, keys, database URLs, authorization headers, and secret values.
+- [x] Write a runbook for each alert, plus deployment rollback, queue backlog, dead-letter recovery, database restore, and credential compromise.
 
 ### Security
 
-- [ ] Create a concise threat model covering untrusted text, denial of service, sensitive historical material, dependency compromise, queue tampering, and unauthorized data access.
-- [ ] State plainly in the threat model and user-facing docs that these are broken classical ciphers offering zero confidentiality and must never protect real secrets.
-- [ ] Frame log redaction and data-sensitivity controls around user-submitted content privacy (for example a real historical document someone is analysing), not key secrecy, so the controls are not security theatre over non-secret keys.
-- [ ] Add API authentication only when user-specific saved jobs are introduced; use Microsoft Entra ID rather than a custom password system.
-- [ ] Enforce authorization by resource ownership if accounts are added.
-- [ ] Add rate limiting and workload limits before advertising a public endpoint.
-- [ ] Pin GitHub Actions by commit SHA and review dependency update automation.
-- [ ] Document vulnerability response and data deletion procedures.
+- [x] Create a concise threat model covering untrusted text, denial of service, sensitive historical material, dependency compromise, queue tampering, and unauthorized data access.
+- [x] State plainly in the threat model and user-facing docs that these are broken classical ciphers offering zero confidentiality and must never protect real secrets.
+- [x] Frame log redaction and data-sensitivity controls around user-submitted content privacy (for example a real historical document someone is analysing), not key secrecy, so the controls are not security theatre over non-secret keys.
+- [x] Add API authentication only when user-specific saved jobs are introduced; use Microsoft Entra ID rather than a custom password system.
+  *Documented and deferred: there are no accounts yet. The threat model records the Entra ID plan.*
+- [x] Enforce authorization by resource ownership if accounts are added.
+  *Documented and deferred with authentication. Until then, listing is off in Azure and jobs are read by unguessable ID.*
+- [x] Add rate limiting and workload limits before advertising a public endpoint.
+- [x] Pin GitHub Actions by commit SHA and review dependency update automation.
+- [x] Document vulnerability response and data deletion procedures.
 
 ### Exit Criteria
 
 - [ ] A tagged release can progress from source to Azure without local commands.
+  *Implemented (`release.yml` → `deploy.yml`); pending a first live run after the GitHub environments are configured and `prod` is provisioned.*
 - [ ] A failed rollout can return to the previous revision with documented steps.
-- [ ] An operator can find a request and its worker job using one correlation ID.
+  *Documented in the rollback runbook and simulated locally; pending the live rollback drill on `dev`.*
+- [x] An operator can find a request and its worker job using one correlation ID.
+  *Verified on the local stack (same `correlation_id` in the API `analysis_submitted` and worker `job_processed` logs); KQL for Application Insights in ADR-0014.*
 - [ ] Alerts are tested deliberately rather than assumed to work.
+  *Each alert has a deliberate test procedure in `docs/operations/alerts.md`; pending a live run on `dev` after `terraform apply`.*
 
 ## Phase 10: Portfolio and Documentation Finish
 

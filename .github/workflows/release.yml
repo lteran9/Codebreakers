@@ -1,0 +1,68 @@
+name: Release
+
+# Pushing a version tag (for example `git tag v0.9.0 && git push origin v0.9.0`)
+# runs every CI gate on the tagged commit, publishes a GitHub Release with
+# generated notes, the CycloneDX SBOM, and signed build provenance, then
+# deploys that exact image to production after a required reviewer approves
+# the `production` environment (ADR-0013). No local commands are involved.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    # CI's dev deployment job is skipped for tags, but reusable-workflow
+    # permissions are checked statically, so its grant must be allowed here.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+  publish:
+    name: Publish release
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image
+          path: release
+
+      - name: Name release assets
+        run: |
+          mv release/image.tar.gz "release/codebreakers-${GITHUB_REF_NAME}-image.tar.gz"
+          mv release/sbom.cdx.json "release/codebreakers-${GITHUB_REF_NAME}-sbom.cdx.json"
+
+      # Verify with: gh attestation verify <asset> --repo <owner>/<repo>
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release/codebreakers-*
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" release/codebreakers-*
+          --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+          --title "Codebreakers $GITHUB_REF_NAME"
+
+  production:
+    name: Production
+    needs: publish
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production

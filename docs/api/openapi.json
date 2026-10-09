@@ -764,7 +764,7 @@
     },
     "/v1/analyses": {
       "get": {
-        "description": "Return retained jobs newest first using offset and limit pagination.",
+        "description": "Return retained jobs newest first using offset and limit pagination.\n\nJobs are not tied to a user, so a shared deployment disables listing and\nanswers `404`; each job is then reachable only through its own URL.",
         "operationId": "list_analyses",
         "parameters": [
           {
@@ -802,6 +802,16 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -811,6 +821,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           },
           "500": {
             "content": {
@@ -829,7 +849,7 @@
         ]
       },
       "post": {
-        "description": "Queue a keyless analysis and return the pending job resource.\n\nA worker runs the analysis asynchronously. Poll the `Location` URL until\n`status` is `succeeded`, `failed`, or `cancelled`. A W3C `traceparent`\nheader, when valid, is propagated to the worker with the correlation ID.",
+        "description": "Queue a keyless analysis and return the pending job resource.\n\nA worker runs the analysis asynchronously. Poll the `Location` URL until\n`status` is `succeeded`, `failed`, or `cancelled`. Clients over their\nsubmission rate get `429`, and a full job backlog answers `503`; both\ninclude `Retry-After`. The request's trace\ncontext (or a valid inbound W3C `traceparent` header when tracing is off)\nis propagated to the worker with the correlation ID.",
         "operationId": "create_analysis",
         "requestBody": {
           "content": {
@@ -872,6 +892,16 @@
             },
             "description": "Unprocessable Entity"
           },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -881,6 +911,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "summary": "Submit an analysis",
@@ -935,6 +975,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           },
           "500": {
             "content": {
@@ -1025,6 +1075,16 @@
             },
             "description": "Unprocessable Entity"
           },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -1113,6 +1173,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           },
           "500": {
             "content": {
