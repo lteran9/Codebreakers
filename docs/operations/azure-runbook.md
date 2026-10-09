@@ -15,10 +15,10 @@ use `environments/prod.tfvars`.
 - Resource providers registered once per subscription:
 
   ```bash
-  for ns in Microsoft.App Microsoft.ContainerRegistry Microsoft.DBforPostgreSQL \
+  for ns in Microsoft.App Microsoft.ManagedIdentity Microsoft.ContainerRegistry Microsoft.DBforPostgreSQL \
             Microsoft.KeyVault Microsoft.OperationalInsights Microsoft.Insights \
             Microsoft.Storage Microsoft.Consumption; do
-    az provider register --namespace "$ns"
+    az provider register --namespace "$ns" --wait
   done
   ```
 
