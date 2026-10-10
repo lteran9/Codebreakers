@@ -50,6 +50,9 @@ _ALLOWED_TRANSITIONS: Mapping[AnalysisStatus, frozenset[AnalysisStatus]] = {
 TERMINAL_STATUSES: frozenset[AnalysisStatus] = frozenset(
     {AnalysisStatus.SUCCEEDED, AnalysisStatus.FAILED, AnalysisStatus.CANCELLED}
 )
+UNFINISHED_STATUSES: frozenset[AnalysisStatus] = (
+    frozenset(AnalysisStatus) - TERMINAL_STATUSES
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,9 +156,17 @@ class AnalysisRepository(Protocol):
         ...
 
     def enqueue(
-        self, job: AnalysisJob, source_text: str, message: AnalysisJobMessage
+        self,
+        job: AnalysisJob,
+        source_text: str,
+        message: AnalysisJobMessage,
+        max_unfinished: int | None = None,
     ) -> None:
-        """Atomically persist a pending job, its source text, and an outbox entry."""
+        """Atomically persist an eligible job, its source text, and an outbox entry.
+
+        When ``max_unfinished`` is set, reject the job if the unfinished-job
+        limit has been reached.
+        """
         ...
 
     def get_source_text(self, job_id: UUID) -> str | None:
@@ -172,6 +183,10 @@ class AnalysisRepository(Protocol):
 
     def count(self) -> int:
         """Return the number of retained jobs."""
+        ...
+
+    def count_unfinished(self) -> int:
+        """Return the number of pending or running jobs."""
         ...
 
     def update(self, job: AnalysisJob, expected_version: int) -> AnalysisJob:
@@ -197,12 +212,18 @@ class AnalysisService:
         repository: AnalysisRepository,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         id_factory: Callable[[], UUID] = uuid4,
+        max_unfinished: int | None = None,
     ) -> None:
+        """``max_unfinished`` caps pending and running jobs; ``None`` is no cap."""
+        if max_unfinished is not None and max_unfinished < 1:
+            msg = "max_unfinished must be at least 1."
+            raise ValueError(msg)
         self._analyzers = analyzers
         self._languages = languages
         self._repository = repository
         self._clock = clock
         self._id_factory = id_factory
+        self._max_unfinished = max_unfinished
 
     def _resolve(
         self, analyzer: str, language: str
@@ -240,7 +261,9 @@ class AnalysisService:
             parameters={"language": language},
         )
         message = AnalysisJobMessage(job_id=job.id, trace=trace or TraceContext())
-        self._repository.enqueue(job, text, message)
+        self._repository.enqueue(
+            job, text, message, max_unfinished=self._max_unfinished
+        )
         return job
 
     def get(self, job_id: UUID) -> AnalysisJob:

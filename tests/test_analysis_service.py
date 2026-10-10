@@ -1,5 +1,6 @@
 """Tests for the analysis application service and in-memory repository."""
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -11,6 +12,7 @@ from codebreakers.application.analysis import (
     AnalysisStatus,
 )
 from codebreakers.application.errors import (
+    AnalysisCapacityError,
     AnalysisNotFoundError,
     ConcurrentAnalysisUpdateError,
     UnsupportedAnalyzerError,
@@ -98,6 +100,31 @@ def test_submit_rejects_unsupported_names_before_queueing() -> None:
     with pytest.raises(UnsupportedLanguageError):
         service.submit("echo", "ABC", "klingon")
     assert repository.count() == 0
+
+
+@pytest.mark.unit
+def test_concurrent_submissions_respect_unfinished_job_limit() -> None:
+    repository = InMemoryAnalysisRepository()
+    service = AnalysisService(
+        analyzers={"echo": _factory},
+        languages={"test": MODEL},
+        repository=repository,
+        max_unfinished=4,
+    )
+
+    def submit() -> bool:
+        try:
+            service.submit("echo", "ABC", "test")
+        except AnalysisCapacityError:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        accepted = list(executor.map(lambda _: submit(), range(32)))
+
+    assert sum(accepted) == 4
+    assert repository.count_unfinished() == 4
+    assert len({job.id for job in repository.list(0, 32)}) == 4
 
 
 @pytest.mark.unit

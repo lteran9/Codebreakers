@@ -6,6 +6,18 @@ conventions are in [ADR-0011](../architecture/ADR-0011-terraform.md). The
 commands use `dev`. For `prod`, add `TF_ENV=prod` to every `make` command and
 use `environments/prod.tfvars`.
 
+Responsibilities are split
+([ADR-0013](../architecture/ADR-0013-continuous-delivery.md)):
+
+- **Terraform**, run by an operator, owns the infrastructure.
+- **GitHub Actions** owns application releases: images, revisions, and API
+  traffic.
+
+Terraform ignores the image and traffic fields that CI changes. After the
+[first deployment](#3-first-deployment) and
+[connecting GitHub Actions](#4-connect-github-actions), every push to
+`master` deploys `dev`.
+
 ## Prerequisites
 
 - An Azure subscription where you hold **Owner**, or **Contributor** plus
@@ -126,37 +138,106 @@ docker buildx build \
 
 Continue only after the push succeeds. Keep the same commit checked out for
 the following Terraform plan so the deployed image tag matches the pushed
-image. Repeat these commands for each release.
+image. After the first deployment, CI pushes the images instead. Use these
+commands again only for a [break-glass release](#break-glass-release-from-a-workstation).
 
 `make azure-image` remains an optional alternative for subscriptions that
 support ACR Tasks; it builds inside Azure rather than locally. Do not use it
 when ACR Tasks are unavailable. Neither approach requires registry admin
 credentials: the local push uses your signed-in Azure identity.
 
+## 4. Connect GitHub Actions
+
+The CI workflow deploys through the GitHub environment `dev`, and the release
+workflow deploys through `production`. Each environment signs in to Azure
+with its own OIDC identity, `id-codebreakers-<env>-deploy`, which Terraform
+creates. No client secret exists.
+
+1. **Create the environments.** In **Settings → Environments**, create `dev`
+   and `production`:
+   - `dev`: under **Deployment branches and tags**, allow only `master`.
+   - `production`: add yourself, or the release approvers, as **Required
+     reviewers**, and allow only tags matching `v*`.
+
+   Only workflow jobs that run in an environment can use its Azure identity,
+   so these rules decide who can deploy.
+2. **Set the environment variables** from Terraform. They are identifiers,
+   not secrets:
+
+   ```bash
+   gh api --method PUT "repos/{owner}/{repo}/environments/dev" > /dev/null   # if not created above
+   terraform -chdir=infra/azure output -json github_environment_variables |
+     jq -r 'to_entries[] | "\(.key)\t\(.value)"' |
+     while IFS=$'\t' read -r name value; do gh variable set "$name" --env dev --body "$value"; done
+   gh variable list --env dev
+   ```
+
+   Repeat with `TF_ENV=prod` outputs and `--env production` once `prod` is
+   provisioned. Until then, the production job passes its approval gate and
+   then skips with a notice.
+3. **Protect `master`.** Go to **Settings → Rules → Rulesets** (or **Branches
+   → Branch protection rules**).
+   - Require a pull request before merging.
+   - Require these status checks to pass:
+     - *Unit and property tests, lint, types*;
+     - *PostgreSQL integration and migration tests*;
+     - *Dependency and secret scan*;
+     - *Terraform checks and IaC scan*;
+     - *Image build, policy, scan, and container smoke*.
+   - Block force pushes.
+4. **Enable private vulnerability reporting** in **Settings → Code security**.
+   [SECURITY.md](../../SECURITY.md) points reporters there.
+5. **Deploy.** Push to `master`, or re-run the latest `CI` workflow. The
+   *Deploy to dev* job then:
+   - pushes the CI-tested image, tagged with its commit SHA, and attests its
+     provenance;
+   - runs migrations;
+   - creates a new API revision with no traffic, and smoke-tests it at its
+     own URL;
+   - shifts 100 % of traffic to it.
+
+   The job summary lists the revision and URL.
+
 ## Releasing a new version
 
-Commit or check out the release, then complete
-[Build and push the image locally](#build-and-push-the-image-locally) before
-running:
+- **dev:** merge to `master`. CI tests, deploys, and smoke-tests the commit.
+- **production:**
+  1. Tag a commit on `master` that has already passed through `dev`:
+     `git tag -a v1.2.0 -m v1.2.0 <sha> && git push origin v1.2.0`.
+  2. The release workflow reruns CI, then publishes a GitHub release with
+     the image archive, the SBOM, and their provenance attestations.
+  3. It waits for approval on the `production` environment, then deploys.
+- **Rollback:** see the [rollback runbook](rollback-runbook.md).
 
-```bash
-terraform -chdir=infra/azure plan \
-  -var-file=environments/dev.tfvars \
-  -var image_tag=$(git rev-parse HEAD) \
-  -target='azurerm_container_app_job.job["migrate"]' \
-  -out=dev-migrate.tfplan
-terraform -chdir=infra/azure apply dev-migrate.tfplan
-make azure-migrate
-make tf-plan            # only the image tag on 3 apps and 2 jobs should change
-make tf-apply
-make azure-smoke
-```
+Migrations must stay backward compatible with the previous release
+(expand, then contract), because the previous revision stays ready for
+rollback and old revisions keep serving until the switch.
 
-The targeted apply updates only the migration job to the new image, so its
-migrations run before the full apply updates the long-running apps. Replace
-`dev` with `prod` in the plan command when releasing to production. Migrations
-must stay backwards compatible with the previous release, since old API
-revisions keep serving until their replacements are ready (ADR-0010).
+### Infrastructure changes after the first deployment
+
+`make tf-plan` and `make tf-apply` never change images or traffic. A plan
+that changes the API's container template (for example an environment
+variable or a probe) creates a new revision with **no traffic**, still on the
+running image. To promote it, run a deployment: re-run the latest `CI`
+workflow on `master`, or use `make azure-deploy` below. The relay and worker
+use single-revision mode, so their template changes take effect straight
+away.
+
+### Break-glass release from a workstation
+
+If GitHub Actions is unavailable:
+
+1. Push the image as in
+   [Build and push the image locally](#build-and-push-the-image-locally).
+2. Run the same script CI uses:
+
+   ```bash
+   make azure-deploy IMAGE_TAG=$(git rev-parse HEAD)
+   ```
+
+The script performs every step of the CI deployment, using your Azure CLI
+sign-in. Record why it was needed. An image deployed this way has no
+provenance attestation.
 
 ## Verify
 
@@ -212,6 +293,21 @@ revisions keep serving until their replacements are ready (ADR-0010).
    the queue. Then the worker scales towards `ceil(queued / 5)`, capped at 3,
    and returns to 0 about 5 minutes after the queue empties.
 
+   The API allows 10 submissions per client IP per minute on each replica, so
+   only the first 10 or so return `202`. The rest get `429` with
+   `Retry-After`, which is expected.
+
+6. **Alerts and dashboard.** In **Monitor → Alerts → Alert rules**, the
+   resource group should have the API 5xx, restart, PostgreSQL,
+   dead-letter, and queue-age rules. All of them use the action group
+   `ag-codebreakers-dev`. Open the Application Insights workbook
+   *Codebreakers service (dev)*. Then fire each alert once, following the
+   **Test** steps in the [alerts runbook](alerts.md), and check that the
+   email arrives.
+7. **Listing disabled.** `curl -s -o /dev/null -w '%{http_code}' "$API/v1/analyses"`
+   prints `404`. Job listing is off in Azure
+   (`CODEBREAKERS_ANALYSIS_LISTING_ENABLED=false`); fetching by ID still works.
+
 ## Operating
 
 - **Logs and revisions:**
@@ -238,6 +334,13 @@ revisions keep serving until their replacements are ready (ADR-0010).
 - **Budget alerts** go to `budget_contact_emails` at 80 % and 100 % of actual
   spend and 100 % of forecast. Spend is in **Cost Management → Cost analysis**,
   scoped to the resource group.
+- **Operational alerts** go to the same addresses. Each alert links to its
+  section in the [alerts runbook](alerts.md).
+- **Other runbooks:**
+  - [rollback](rollback-runbook.md);
+  - [database restore](database-restore-runbook.md);
+  - [credential compromise](credential-compromise-runbook.md);
+  - [data deletion requests](../../SECURITY.md#data-deletion).
 
 ## Teardown and recreate
 
@@ -270,9 +373,8 @@ az containerapp logs show -g rg-codebreakers-dev -n ca-codebreakers-dev-api \
 
 An `ImportError` mentioning `LogData` indicates an incompatible Azure Monitor
 exporter/OpenTelemetry SDK in the image, not a database or ingress problem.
-Use the corrected runtime lock file, commit the fix, and
-[build and push a new image locally](#build-and-push-the-image-locally).
-Then redeploy with `make tf-plan` and `make tf-apply`.
+Use the corrected runtime lock file and commit the fix. Let CI deploy it, or
+follow the [break-glass release](#break-glass-release-from-a-workstation).
 `make image-check` checks the real telemetry imports in the runtime image.
 
 | Symptom | Cause and fix |
@@ -286,3 +388,7 @@ Then redeploy with `make tf-plan` and `make tf-apply`.
 | Jobs stay `pending` | Check that the relay and worker scale (Verify, step 5). The scale rules use the same Key Vault-backed database URL, so a broken secret reference shows up in `ContainerAppSystemLogs_CL`. |
 | `LocationIsOfferRestricted` or quota errors for PostgreSQL | Some subscriptions cannot create Flexible Server in every region. Set `location` to another region in `local.auto.tfvars` and apply again. |
 | `az containerapp exec` fails with "no replicas" | Wake the API with a request first, then retry. |
+| *Deploy to dev* succeeds with the notice "environment has no Azure variables yet" and deploys nothing | The `dev` environment has no `AZURE_CLIENT_ID` variable. Complete [Connect GitHub Actions](#4-connect-github-actions). |
+| `azure/login` fails with `AADSTS70021` (no matching federated identity) | The job did not run in the expected environment, or the repository name differs from `github_repository`. Check the federated credential subject `repo:<owner>/<repo>:environment:<env>`. |
+| A deployment fails at the smoke test | Traffic stays on the previous revision, and the script restores the previous worker, relay, and job images. Read the job log and the new revision's console logs, then fix forward. |
+| `make tf-plan` shows image or traffic changes | It should not: those fields are ignored. Check that `container_apps.tf` still has its `ignore_changes` blocks. |

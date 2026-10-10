@@ -30,12 +30,17 @@ RUN pip wheel --no-deps --no-build-isolation --wheel-dir /wheels . \
 
 FROM ${PYTHON_IMAGE} AS runtime
 
+# CI passes the Git commit SHA; it is stamped on logs and telemetry.
+ARG CODEBREAKERS_REVISION=unknown
+
 LABEL org.opencontainers.image.title="codebreakers" \
       org.opencontainers.image.description="Codebreakers cipher API, analysis worker, and outbox relay." \
       org.opencontainers.image.source="https://github.com/lteran9/Codebreakers" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.revision="${CODEBREAKERS_REVISION}"
 
 ENV PATH=/opt/venv/bin:$PATH \
+    CODEBREAKERS_REVISION=${CODEBREAKERS_REVISION} \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 

@@ -5,7 +5,10 @@
 Accepted. Amends [ADR-0003](ADR-0003-azure-target.md): Service Bus is deferred
 from the first cloud environment. Extends
 [ADR-0010](ADR-0010-containers-local-stack.md): the PostgreSQL queue also runs
-in Azure `dev`.
+in Azure `dev`. Amended by [ADR-0013](ADR-0013-continuous-delivery.md):
+GitHub Actions releases images and API revisions, and Terraform ignores them.
+Also amended by [ADR-0014](ADR-0014-observability.md), which adds operational
+alerts.
 
 ## Context
 
@@ -73,8 +76,10 @@ resources, and scale rule:
 | migrate (job) | `alembic upgrade head` | 0.25 / 0.5 GiB | one execution | Manual trigger |
 | retention (job) | `python -m codebreakers.infrastructure.persistence.retention` | 0.25 / 0.5 GiB | one execution | Cron `17 3 * * *` |
 
-- **Revisions:** single revision mode with 100 % of traffic on the latest
-  revision. Phase 9 adds staged traffic shifting.
+- **Revisions:** the relay and worker use single revision mode. The API uses
+  multiple revision mode so releases can shift traffic explicitly instead of
+  automatically sending all traffic to the latest revision
+  ([ADR-0013](ADR-0013-continuous-delivery.md)).
 - **Health:** the API has startup and liveness probes on `/health/live` and a
   readiness probe on `/health/ready`, which includes a database check. Container
   Apps probes are HTTP or TCP only, so the relay and worker have no probes.

@@ -28,6 +28,7 @@ from codebreakers.infrastructure.messaging.settlement import (
     summarize_dead_letter,
 )
 from codebreakers.infrastructure.persistence.postgres import JobQueueRecord
+from codebreakers.infrastructure.telemetry import JOB_METRICS, QueueStats
 
 logger = logging.getLogger("codebreakers.worker")
 
@@ -210,6 +211,7 @@ class PostgresQueueReceiver:
         record.dead_letter_description = (
             f"Message was delivered {record.delivery_count} times without settling."
         )
+        JOB_METRICS.dead_lettered(MAX_DELIVERY_COUNT_EXCEEDED)
         logger.warning(
             "job_message_dead_lettered reason=%s sequence_number=%d",
             MAX_DELIVERY_COUNT_EXCEEDED,
@@ -280,3 +282,29 @@ class PostgresDeadLetterQueue:
             replay_to=None,
             max_wait_time=0.0,
         )
+
+
+class PostgresQueueStats:
+    """Read backlog figures for the queue gauges with one aggregate query."""
+
+    def __init__(self, sessions: sessionmaker[Session]) -> None:
+        self._sessions = sessions
+
+    def read(self) -> QueueStats:
+        """Return live depth, oldest ready age, and dead-letter count."""
+        live = JobQueueRecord.dead_lettered_at.is_(None)
+        ready = live & (JobQueueRecord.available_at <= func.now())
+        query = select(
+            func.count().filter(live),
+            func.coalesce(
+                func.extract(
+                    "epoch",
+                    func.now() - func.min(JobQueueRecord.available_at).filter(ready),
+                ),
+                0,
+            ),
+            func.count().filter(JobQueueRecord.dead_lettered_at.is_not(None)),
+        )
+        with self._sessions() as session:
+            depth, oldest, dead = session.execute(query).one()
+        return QueueStats(int(depth), float(oldest), int(dead))

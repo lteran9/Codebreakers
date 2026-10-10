@@ -5,6 +5,25 @@ retrying. Use this runbook to inspect them, then replay or discard each one.
 Background on retries and leases is in
 [ADR-0009](../architecture/ADR-0009-async-analysis-worker.md).
 
+## How you find out
+
+- **Alert.** In Azure, the `alert-codebreakers-<env>-dead-letters` alert emails
+  the operators when the worker dead-letters any job
+  ([alerts runbook](alerts.md#dead-letters)).
+- **Metrics.**
+  - `codebreakers.jobs.dead_lettered` counts dead-lettered jobs by
+    `codebreakers.dead_letter.reason`.
+  - `codebreakers.queue.dead_letters` is the number still waiting (PostgreSQL
+    backend).
+  - Both appear in the *Codebreakers service* workbook
+    ([ADR-0014](../architecture/ADR-0014-observability.md#metrics)).
+- **Logs.** Look for `job_dead_lettered` (retries exhausted) and
+  `job_message_rejected` (invalid message) events.
+
+On Service Bus, the broker can also dead-letter messages itself
+(`MaxDeliveryCountExceeded`). The application does not count those. Watch the
+namespace's `DeadletteredMessages` metric instead.
+
 ## Why messages are dead-lettered
 
 | `reason` | Meaning | Usual action |

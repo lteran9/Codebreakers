@@ -7,7 +7,10 @@ from threading import Lock
 from uuid import UUID
 
 from codebreakers.application.analysis import AnalysisJob, AnalysisRepository
-from codebreakers.application.errors import ConcurrentAnalysisUpdateError
+from codebreakers.application.errors import (
+    AnalysisCapacityError,
+    ConcurrentAnalysisUpdateError,
+)
 from codebreakers.application.messaging import AnalysisJobMessage, AnalysisOutbox
 
 
@@ -34,10 +37,20 @@ class InMemoryAnalysisRepository(AnalysisRepository, AnalysisOutbox):
             self._insert(job)
 
     def enqueue(
-        self, job: AnalysisJob, source_text: str, message: AnalysisJobMessage
+        self,
+        job: AnalysisJob,
+        source_text: str,
+        message: AnalysisJobMessage,
+        max_unfinished: int | None = None,
     ) -> None:
         """Store a pending job with its source text and an outbox entry."""
         with self._lock:
+            if (
+                max_unfinished is not None
+                and sum(not job.is_terminal for job in self._jobs.values())
+                >= max_unfinished
+            ):
+                raise AnalysisCapacityError(max_unfinished)
             self._insert(job)
             self._inputs[job.id] = source_text
             self._outbox[job.id] = message
@@ -112,6 +125,11 @@ class InMemoryAnalysisRepository(AnalysisRepository, AnalysisOutbox):
         """Return the number of retained jobs."""
         with self._lock:
             return len(self._jobs)
+
+    def count_unfinished(self) -> int:
+        """Return the number of pending or running jobs."""
+        with self._lock:
+            return sum(not job.is_terminal for job in self._jobs.values())
 
     def update(self, job: AnalysisJob, expected_version: int) -> AnalysisJob:
         """Update a job if its persisted version still matches."""

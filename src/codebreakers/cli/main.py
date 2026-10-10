@@ -200,7 +200,9 @@ def serve(
     """
     import uvicorn  # deferred so cipher commands do not load the server stack
 
-    _configure_observability()
+    _configure_observability("api")
+    # Uvicorn logs through the root JSON handler; the correlation middleware
+    # writes the access log, so Uvicorn's own one is disabled.
     uvicorn.run(
         "codebreakers.api:create_app",
         factory=True,
@@ -208,16 +210,17 @@ def serve(
         port=port,
         server_header=False,
         timeout_graceful_shutdown=graceful_timeout,
+        log_config=None,
+        access_log=False,
     )
 
 
-def _configure_observability() -> None:
+def _configure_observability(service: str) -> None:
+    from codebreakers.infrastructure.structured_logging import configure_logging
     from codebreakers.infrastructure.telemetry import configure_telemetry
 
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
-    )
-    if configure_telemetry():
+    identity = configure_logging(service)
+    if configure_telemetry(identity=identity):
         logging.getLogger("codebreakers").info("telemetry_enabled")
 
 
@@ -231,13 +234,14 @@ def _worker_settings() -> "WorkerSettings":
 
 
 def _run_until_stopped(
+    service: str,
     target: "Callable[[WorkerSettings, threading.Event], None]",
 ) -> None:
     from codebreakers.worker.main import install_stop_signals
     from codebreakers.worker.settings import ConfigurationError
 
     settings = _worker_settings()
-    _configure_observability()
+    _configure_observability(service)
     stop = threading.Event()
     install_stop_signals(stop)
     try:
@@ -260,7 +264,7 @@ def worker() -> None:
     """
     from codebreakers.worker.main import run_worker
 
-    _run_until_stopped(run_worker)
+    _run_until_stopped("worker", run_worker)
 
 
 @app.command()
@@ -275,7 +279,7 @@ def relay() -> None:
     """
     from codebreakers.worker.main import run_relay
 
-    _run_until_stopped(run_relay)
+    _run_until_stopped("relay", run_relay)
 
 
 @contextmanager

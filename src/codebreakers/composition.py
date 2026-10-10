@@ -184,10 +184,13 @@ ANALYZER_REGISTRY: Mapping[str, AnalyzerFactory] = {
 
 def create_analysis_service(
     repository: AnalysisRepository | None = None,
+    *,
+    max_unfinished: int | None = None,
 ) -> AnalysisService:
     """Build the analysis service over the registered analyzers."""
     return AnalysisService(
         analyzers=ANALYZER_REGISTRY,
         languages=LANGUAGE_MODELS,
         repository=repository or InMemoryAnalysisRepository(),
+        max_unfinished=max_unfinished,
     )

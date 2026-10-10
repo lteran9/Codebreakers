@@ -2,6 +2,7 @@
 
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -15,9 +16,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from codebreakers.api.app import ApiSettings, create_app
 from codebreakers.application.analysis import AnalysisJob, AnalysisStatus
-from codebreakers.application.errors import ConcurrentAnalysisUpdateError
+from codebreakers.application.errors import (
+    AnalysisCapacityError,
+    ConcurrentAnalysisUpdateError,
+)
 from codebreakers.application.messaging import AnalysisJobMessage, TraceContext
 from codebreakers.domain.cryptanalysis.models import AnalysisResult, Candidate
+from codebreakers.infrastructure.persistence import retention
 from codebreakers.infrastructure.persistence.postgres import (
     OutboxRecord,
     SqlAlchemyAnalysisRepository,
@@ -168,15 +173,18 @@ def test_repository_round_trip_pagination_concurrency_and_retention(
     page = repository.list(offset=0, limit=2)
     assert tuple(job.id for job in page) == (newest.id, completed.id)
     assert repository.count() == 3
+    assert repository.count_unfinished() == 2
 
     running = older.transition(AnalysisStatus.RUNNING, FIXED_TIME)
     repository.update(running, expected_version=older.version)
     with pytest.raises(ConcurrentAnalysisUpdateError):
         repository.update(running, expected_version=older.version)
+    assert repository.count_unfinished() == 2
 
     assert repository.delete_expired(FIXED_TIME - timedelta(days=7)) == 1
     assert repository.get(older.id) is None
     assert repository.count() == 2
+    assert repository.count_unfinished() == 1
 
 
 def _message(job_id: UUID) -> AnalysisJobMessage:
@@ -216,6 +224,30 @@ def test_enqueue_keeps_input_until_terminal_and_relays_once(
     )
     repository.update(failed, expected_version=released.version)
     assert repository.get_source_text(pending.id) is None
+
+
+@pytest.mark.integration
+def test_concurrent_enqueues_respect_unfinished_job_limit(
+    repository: SqlAlchemyAnalysisRepository,
+) -> None:
+    def enqueue(index: int) -> bool:
+        job = _job(index, FIXED_TIME)
+        try:
+            repository.enqueue(
+                job,
+                "KHOOR",
+                _message(job.id),
+                max_unfinished=4,
+            )
+        except AnalysisCapacityError:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=16) as executor:
+        accepted = list(executor.map(enqueue, range(1, 33)))
+
+    assert sum(accepted) == 4
+    assert repository.count_unfinished() == 4
 
 
 @pytest.mark.integration
@@ -276,6 +308,36 @@ def test_retention_purge_cascades_to_inputs_and_outbox(
         for table in ("analysis_job_inputs", "analysis_outbox"):
             count = connection.execute(text(f"SELECT count(*) FROM {table}"))
             assert count.scalar_one() == 0
+
+
+@pytest.mark.integration
+def test_delete_removes_named_jobs_with_inputs_and_outbox(
+    database_engine: Engine,
+    repository: SqlAlchemyAnalysisRepository,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    doomed = _job(50, FIXED_TIME)
+    kept = _job(51, FIXED_TIME)
+    for job in (doomed, kept):
+        repository.enqueue(job, "PRIVATE LETTER", _message(job.id))
+    assert repository.delete([]) == 0
+
+    monkeypatch.setenv(
+        "CODEBREAKERS_DATABASE_URL",
+        database_engine.url.render_as_string(hide_password=False),
+    )
+    retention.main(["--delete-job", str(doomed.id), "--delete-job", str(UUID(int=99))])
+
+    output = capsys.readouterr().out
+    assert output.strip() == "Deleted 1 of 2 requested job(s)."
+    assert "PRIVATE LETTER" not in output
+    assert repository.get(doomed.id) is None
+    assert repository.get(kept.id) is not None
+    with database_engine.connect() as connection:
+        for table in ("analysis_job_inputs", "analysis_outbox"):
+            rows = connection.execute(text(f"SELECT job_id FROM {table}"))
+            assert [row.job_id for row in rows] == [kept.id]
 
 
 def _api_settings(database_engine: Engine) -> ApiSettings:

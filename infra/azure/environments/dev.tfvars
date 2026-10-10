@@ -16,4 +16,7 @@ postgres_backup_retention_days = 7
 log_retention_days = 30
 log_daily_quota_gb = 0.25
 
+# GitHub Actions jobs in this environment deploy revisions via OIDC.
+github_environment = "dev"
+
 budget_amount = 40

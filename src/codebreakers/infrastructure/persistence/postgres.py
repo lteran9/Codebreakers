@@ -1,7 +1,7 @@
 """SQLAlchemy repository adapter for durable analysis jobs."""
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -31,12 +31,16 @@ from sqlalchemy.engine import CursorResult, Engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from codebreakers.application.analysis import (
+    UNFINISHED_STATUSES,
     AnalysisJob,
     AnalysisOutcome,
     AnalysisRepository,
     AnalysisStatus,
 )
-from codebreakers.application.errors import ConcurrentAnalysisUpdateError
+from codebreakers.application.errors import (
+    AnalysisCapacityError,
+    ConcurrentAnalysisUpdateError,
+)
 from codebreakers.application.messaging import (
     AnalysisJobMessage,
     AnalysisOutbox,
@@ -51,8 +55,10 @@ from codebreakers.domain.cryptanalysis.models import (
     Candidate,
     FrequencyAnalysisReport,
 )
+from codebreakers.infrastructure.telemetry import trace_engine
 
 _NONFINITE_FLOAT_KEY = "__codebreakers_nonfinite_float__"
+_ANALYSIS_CAPACITY_LOCK_KEY = 0x434F444542524541
 
 
 class Base(DeclarativeBase):
@@ -176,10 +182,27 @@ class SqlAlchemyAnalysisRepository(AnalysisRepository, AnalysisOutbox):
             session.add(_to_record(job))
 
     def enqueue(
-        self, job: AnalysisJob, source_text: str, message: AnalysisJobMessage
+        self,
+        job: AnalysisJob,
+        source_text: str,
+        message: AnalysisJobMessage,
+        max_unfinished: int | None = None,
     ) -> None:
         """Insert a pending job, its source text, and its outbox message together."""
         with self._sessions.begin() as session:
+            if max_unfinished is not None:
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(:lock_key)"),
+                    {"lock_key": _ANALYSIS_CAPACITY_LOCK_KEY},
+                )
+                unfinished = [status.value for status in UNFINISHED_STATUSES]
+                count = session.scalar(
+                    select(func.count())
+                    .select_from(AnalysisRecord)
+                    .where(AnalysisRecord.status.in_(unfinished))
+                )
+                if (count or 0) >= max_unfinished:
+                    raise AnalysisCapacityError(max_unfinished)
             session.add(_to_record(job))
             session.flush()
             session.add(
@@ -293,6 +316,17 @@ class SqlAlchemyAnalysisRepository(AnalysisRepository, AnalysisOutbox):
         with self._sessions() as session:
             return session.scalar(select(func.count()).select_from(AnalysisRecord)) or 0
 
+    def count_unfinished(self) -> int:
+        """Return the number of pending or running jobs."""
+        unfinished = [status.value for status in UNFINISHED_STATUSES]
+        query = (
+            select(func.count())
+            .select_from(AnalysisRecord)
+            .where(AnalysisRecord.status.in_(unfinished))
+        )
+        with self._sessions() as session:
+            return session.scalar(query) or 0
+
     def update(self, job: AnalysisJob, expected_version: int) -> AnalysisJob:
         """Update a job only if its version has not changed since it was read."""
         if job.version != expected_version + 1:
@@ -332,6 +366,24 @@ class SqlAlchemyAnalysisRepository(AnalysisRepository, AnalysisOutbox):
                 )
         return job
 
+    def delete(self, job_ids: Iterable[UUID]) -> int:
+        """Delete specific jobs now; inputs and outbox rows cascade.
+
+        Supports data-deletion requests (SECURITY.md). Queue rows hold only
+        identifiers and are left for the worker, which ignores missing jobs.
+        """
+        ids = list(job_ids)
+        if not ids:
+            return 0
+        with self._sessions.begin() as session:
+            result = cast(
+                CursorResult[Any],
+                session.execute(
+                    delete(AnalysisRecord).where(AnalysisRecord.id.in_(ids))
+                ),
+            )
+            return result.rowcount or 0
+
     def delete_expired(self, before: datetime) -> int:
         """Delete jobs created before the cutoff; inputs and outbox rows cascade."""
         with self._sessions.begin() as session:
@@ -354,7 +406,9 @@ def create_postgres_engine(database_url: str, **options: Any) -> Engine:
     url = make_url(database_url)
     if url.drivername in {"postgres", "postgresql"}:
         url = url.set(drivername="postgresql+psycopg")
-    return create_engine(url, **options)
+    engine = create_engine(url, **options)
+    trace_engine(engine)
+    return engine
 
 
 def _clean_json(value: Any) -> Any:

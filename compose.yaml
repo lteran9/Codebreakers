@@ -29,6 +29,11 @@ x-app: &app
     CODEBREAKERS_WORKER_RETRY_BASE_SECONDS: ${CODEBREAKERS_WORKER_RETRY_BASE_SECONDS:-2}
     CODEBREAKERS_WORKER_RETRY_MAX_SECONDS: ${CODEBREAKERS_WORKER_RETRY_MAX_SECONDS:-60}
     CODEBREAKERS_ANALYSIS_RETENTION_DAYS: ${CODEBREAKERS_ANALYSIS_RETENTION_DAYS:-7}
+    CODEBREAKERS_RATE_LIMIT_PER_MINUTE: ${CODEBREAKERS_RATE_LIMIT_PER_MINUTE:-120}
+    CODEBREAKERS_ANALYSIS_SUBMISSIONS_PER_MINUTE: ${CODEBREAKERS_ANALYSIS_SUBMISSIONS_PER_MINUTE:-10}
+    CODEBREAKERS_MAX_PENDING_ANALYSES: ${CODEBREAKERS_MAX_PENDING_ANALYSES:-100}
+    CODEBREAKERS_LOG_FORMAT: ${CODEBREAKERS_LOG_FORMAT:-json}
+    CODEBREAKERS_LOG_LEVEL: ${CODEBREAKERS_LOG_LEVEL:-INFO}
   restart: unless-stopped
   depends_on:
     migrate:
@@ -62,7 +67,9 @@ services:
       - /tmp
       - /var/run/postgresql:uid=70,gid=70,mode=0775
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      # PostgreSQL 18+ images keep data in a major-version subdirectory of
+      # /var/lib/postgresql. A new volume name leaves data from older majors intact.
+      - postgres18-data:/var/lib/postgresql
     healthcheck:
       # TCP rather than the socket: the init-time server listens on the socket only.
       test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "codebreakers", "-d", "codebreakers"]
@@ -120,4 +127,4 @@ services:
     stop_grace_period: 45s
 
 volumes:
-  postgres-data:
+  postgres18-data:

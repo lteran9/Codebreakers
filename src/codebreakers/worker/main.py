@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import timedelta
 
-from azure.servicebus import ServiceBusClient
+from azure.servicebus import ServiceBusClient, ServiceBusSender
 from sqlalchemy.orm import Session, sessionmaker
 
 from codebreakers.application.messaging import JobPublisher
@@ -15,6 +15,7 @@ from codebreakers.infrastructure.messaging.postgres_queue import (
     PostgresDeadLetterQueue,
     PostgresJobPublisher,
     PostgresQueueReceiver,
+    PostgresQueueStats,
 )
 from codebreakers.infrastructure.messaging.servicebus import (
     ServiceBusDeadLetterQueue,
@@ -29,6 +30,10 @@ from codebreakers.infrastructure.persistence.postgres import (
     SqlAlchemyAnalysisRepository,
     create_postgres_engine,
 )
+from codebreakers.infrastructure.telemetry import (
+    TracingJobPublisher,
+    register_queue_gauges,
+)
 from codebreakers.worker.handler import build_handler
 from codebreakers.worker.heartbeat import Heartbeat
 from codebreakers.worker.settings import QueueBackend, WorkerSettings
@@ -39,6 +44,7 @@ logger = logging.getLogger("codebreakers.worker")
 _LOCK_RENEWAL_MARGIN = timedelta(minutes=1)
 # Short waits keep the PostgreSQL consumer responsive to shutdown signals.
 _POSTGRES_RECEIVE_WAIT = 1.0
+_POSTGRES_QUEUE = "analysis_job_queue"
 
 
 @contextmanager
@@ -80,6 +86,16 @@ def _uses_postgres_queue(settings: WorkerSettings) -> bool:
     return settings.queue_backend is QueueBackend.POSTGRES
 
 
+def _postgres_publisher(sessions: sessionmaker[Session]) -> JobPublisher:
+    return TracingJobPublisher(
+        PostgresJobPublisher(sessions), "postgresql", _POSTGRES_QUEUE
+    )
+
+
+def _service_bus_publisher(sender: ServiceBusSender, queue: str) -> JobPublisher:
+    return TracingJobPublisher(ServiceBusJobPublisher(sender), "servicebus", queue)
+
+
 def run_worker(settings: WorkerSettings, stop: threading.Event) -> None:
     """Consume job messages until ``stop`` is set.
 
@@ -91,7 +107,8 @@ def run_worker(settings: WorkerSettings, stop: threading.Event) -> None:
     if _uses_postgres_queue(settings):
         with _postgres_sessions(settings) as sessions:
             handler = build_handler(_repository(sessions, settings), settings)
-            consumer = JobConsumer(handler.handle, PostgresJobPublisher(sessions))
+            consumer = JobConsumer(handler.handle, _postgres_publisher(sessions))
+            register_queue_gauges(PostgresQueueStats(sessions).read)
             logger.info("worker_started queue=postgres")
             consumer.consume(
                 PostgresQueueReceiver(sessions, lock_duration=lock_duration),
@@ -107,7 +124,7 @@ def run_worker(settings: WorkerSettings, stop: threading.Event) -> None:
         ):
             handler = build_handler(repository, settings)
             sb_consumer = ServiceBusJobConsumer(
-                handler.handle, ServiceBusJobPublisher(sender)
+                handler.handle, _service_bus_publisher(sender, settings.queue_name)
             )
             logger.info("worker_started queue=%s", settings.queue_name)
             sb_consumer.run(
@@ -126,14 +143,14 @@ def _relay_endpoints(
 ) -> Iterator[tuple[SqlAlchemyAnalysisRepository, JobPublisher]]:
     if _uses_postgres_queue(settings):
         with _postgres_sessions(settings) as sessions:
-            yield _repository(sessions, settings), PostgresJobPublisher(sessions)
+            yield _repository(sessions, settings), _postgres_publisher(sessions)
         return
     with (
         _postgres_repository(settings) as repository,
         _service_bus_client(settings) as client,
         client.get_queue_sender(settings.queue_name) as sender,
     ):
-        yield repository, ServiceBusJobPublisher(sender)
+        yield repository, _service_bus_publisher(sender, settings.queue_name)
 
 
 def run_relay(settings: WorkerSettings, stop: threading.Event) -> None:
