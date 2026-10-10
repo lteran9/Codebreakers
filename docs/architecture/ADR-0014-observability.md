@@ -80,8 +80,8 @@ retaining what was submitted.
   - Gauges exist only while a worker replica runs. The worker scales to zero
     when the queue is empty, so a gap means "idle", not "no data". KEDA starts
     a worker as soon as anything is queued, which brings the gauges back.
-  - If the worker cannot start at all, the restart and queue-age alerts
-    catch it from the platform side.
+  - If the worker crash-loops, the replica-restart alert catches it. Pending
+    jobs with no replicas require checking the KEDA scale rule.
   - On the Service Bus backend, messages the broker dead-letters itself
     (`MaxDeliveryCountExceeded`) are not counted by the application. Use the
     namespace's `DeadletteredMessages` metric there.
