@@ -14,6 +14,7 @@ from codebreakers.api.schemas import (
     AnalysisRequest,
 )
 from codebreakers.application.messaging import TraceContext
+from codebreakers.infrastructure.structured_logging import bind_log_context
 from codebreakers.infrastructure.telemetry import current_traceparent
 
 TRACEPARENT_HEADER = "traceparent"
@@ -78,7 +79,8 @@ def create_analysis(
         current_traceparent() or request.headers.get(TRACEPARENT_HEADER),
     )
     job = service.submit(body.analyzer, body.text, body.language, trace)
-    logger.info("analysis_submitted job_id=%s analyzer=%s", job.id, job.analyzer)
+    with bind_log_context(job_id=str(job.id), correlation_id=trace.correlation_id):
+        logger.info("analysis_submitted analyzer=%s", job.analyzer)
     response.headers["Location"] = request.app.url_path_for(
         "get_analysis", analysis_id=str(job.id)
     )

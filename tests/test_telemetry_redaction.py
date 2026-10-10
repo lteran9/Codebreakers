@@ -86,6 +86,10 @@ def test_request_spans_and_logs_exclude_content_keys_and_credentials(
         for line in log_lines
     )
     assert '"event": "analysis_submitted"' in exported
+    assert any(
+        line["event"] == "analysis_submitted" and line["job_id"] == location.rsplit("/", 1)[-1]
+        for line in log_lines
+    )
     assert '"event": "job_processed"' in exported
     for secret in (PLAINTEXT, encrypted, shifted, KEY, TOKEN, "eyJsentinel", COOKIE):
         assert secret not in exported
