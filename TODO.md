@@ -337,7 +337,8 @@ Cipher encryption and decryption should remain stateless.
 
 ### Exit Criteria
 
-- [ ] A public HTTPS API completes a queued analysis end to end.
+- [x] A public HTTPS API completes a queued analysis end to end.
+  *Verified 2026-10-12: 10 of 10 queued Caesar analyses succeeded on `dev` over HTTPS (`make azure-measure`, `docs/evidence/azure-dev-measure-2026-10-12.json`).*
 - [ ] Infrastructure can be reproduced from Terraform plus documented bootstrap
   steps, with no portal-only configuration.
 - [x] Cost, backup, retention, identity, and teardown decisions are documented.
@@ -402,29 +403,40 @@ Cipher encryption and decryption should remain stateless.
 
 ### Build the Project Narrative
 
-- [ ] Rewrite the README around the actual delivered capabilities, not planned features. Include a short demo, architecture diagram, local quick start, test commands, deployed API link, and documentation index.
-- [ ] Add `docs/domain.md` explaining cipher abstractions, analysis capabilities, scoring, limitations, and links to historical source material.
-- [ ] Add `docs/operations.md` covering configuration, deployment, migration, observability, backup, restore, rollback, and teardown.
-- [ ] Keep ADRs for consequential choices and alternatives: protocols, job state machine, PostgreSQL, Service Bus, Container Apps, Terraform, and identity.
-- [ ] Publish benchmark results with reproducible commands and avoid unsupported
+- [x] Rewrite the README around the actual delivered capabilities, not planned features. Include a short demo, architecture diagram, local quick start, test commands, deployed API link, and documentation index.
+  *The deployed API is described but its URL is intentionally not published.*
+- [x] Add `docs/domain.md` explaining cipher abstractions, analysis capabilities, scoring, limitations, and links to historical source material.
+- [x] Add `docs/operations.md` covering configuration, deployment, migration, observability, backup, restore, rollback, and teardown.
+  *A hub that links to the detailed runbooks in `docs/operations/`.*
+- [x] Keep ADRs for consequential choices and alternatives: protocols, job state machine, PostgreSQL, Service Bus, Container Apps, Terraform, and identity.
+  *Added ADR-0015 (protocols), ADR-0016 (job state machine), ADR-0017 (identity), alternatives for ADR-0003/0008/0009, and a topic index in `docs/architecture/README.md`.*
+- [x] Publish benchmark results with reproducible commands and avoid unsupported
   performance claims.
-- [ ] Add an API usage collection or executable examples using `curl`.
+  *`docs/benchmarks.md`, `make benchmark` / `make azure-measure`, raw output in `docs/evidence/`.*
+- [x] Add an API usage collection or executable examples using `curl`.
+  *`examples/api.sh`, verified against the in-process server and the Compose stack.*
 - [ ] Add a short screen recording or screenshots showing CLI use, OpenAPI, queued analysis, Azure telemetry, and a deployment workflow.
-- [ ] Add a roadmap section distinguishing completed work from future ideas.
+  *CLI, OpenAPI, and queued analysis are captured in `docs/media/`. Azure telemetry and deployment-workflow screenshots are pending (shot list in `docs/media/README.md`); the deployment shot needs the first live Deploy run.*
+- [x] Add a roadmap section distinguishing completed work from future ideas.
 
 ### Prepare CV and Interview Evidence
 
-- [ ] Capture measurable facts: number of cipher families, property-test cases, coverage, image size, deployment time, request latency, job throughput, and monthly development-environment cost.
-- [ ] Prepare a two-minute architecture explanation focused on boundaries and why the system evolved in phases.
-- [ ] Prepare examples of one rejected design, one production failure simulated in testing, and one security or cost trade-off.
-- [ ] Prefer precise CV language such as: "Built and deployed a typed Python cryptanalysis service on Azure Container Apps with asynchronous Service Bus workers, PostgreSQL persistence, OpenTelemetry, and Terraform-based delivery."
-- [ ] Do not claim enterprise scale, zero downtime, or security guarantees that were not measured and demonstrated.
+- [x] Capture measurable facts: number of cipher families, property-test cases, coverage, image size, deployment time, request latency, job throughput, and monthly development-environment cost.
+  *In `docs/portfolio.md`. Deployment time is not yet measurable: the CI *Deploy to dev* job fails at Azure sign-in until the GitHub `dev` environment is configured.*
+- [x] Prepare a two-minute architecture explanation focused on boundaries and why the system evolved in phases.
+- [x] Prepare examples of one rejected design, one production failure simulated in testing, and one security or cost trade-off.
+- [x] Prefer precise CV language such as: "Built and deployed a typed Python cryptanalysis service on Azure Container Apps with asynchronous Service Bus workers, PostgreSQL persistence, OpenTelemetry, and Terraform-based delivery."
+  *Adjusted for accuracy: the deployed workers use the PostgreSQL queue; Service Bus is an implemented, contract-tested adapter.*
+- [x] Do not claim enterprise scale, zero downtime, or security guarantees that were not measured and demonstrated.
+  *Listed explicitly under "Claims this project does not support" in `docs/portfolio.md`.*
 
 ### Final Exit Criteria
 
-- [ ] A new contributor can run the project locally from the README.
+- [x] A new contributor can run the project locally from the README.
 - [ ] The public demo has a controlled cost and can be shut down cleanly.
+  *Cost is controlled: scale to zero, a $40 budget alert, and about $0.21/day observed. Pause and teardown are documented in `docs/operations.md` but have not been exercised on `dev`.*
 - [ ] CI, deployment, rollback, telemetry, and core cipher behavior are each demonstrated by a repeatable artifact or test.
+  *CI, telemetry correlation (`docs/media/queued-analysis-flow.md`), and cipher behavior are demonstrated. Deployment and rollback are scripted and simulated locally, pending their first live runs on `dev`.*
 
 ## Cross-Phase Definition of Done
 

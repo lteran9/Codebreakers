@@ -1,0 +1,175 @@
+{
+  "python_version": "3.12.15",
+  "platform": "macOS-26.4-arm64-arm-64bit",
+  "machine": "arm64",
+  "results": [
+    {
+      "benchmark": "caesar-bruteforce",
+      "input_size": 128,
+      "median_seconds": 0.001966,
+      "iterations": 5,
+      "key_recovered": true
+    },
+    {
+      "benchmark": "vigenere-frequency",
+      "input_size": 128,
+      "median_seconds": 0.012594,
+      "iterations": 5,
+      "key_recovered": false
+    },
+    {
+      "benchmark": "substitution-frequency",
+      "input_size": 128,
+      "median_seconds": 4.7e-05,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "homophonic-distribution",
+      "input_size": 128,
+      "median_seconds": 2.5e-05,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "caesar-round-trip",
+      "input_size": 128,
+      "median_seconds": 9.9e-05,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "vigenere-round-trip",
+      "input_size": 128,
+      "median_seconds": 0.000114,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "substitution-round-trip",
+      "input_size": 128,
+      "median_seconds": 0.000104,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "homophonic-round-trip",
+      "input_size": 128,
+      "median_seconds": 7.9e-05,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "caesar-bruteforce",
+      "input_size": 2048,
+      "median_seconds": 0.027514,
+      "iterations": 5,
+      "key_recovered": true
+    },
+    {
+      "benchmark": "vigenere-frequency",
+      "input_size": 2048,
+      "median_seconds": 0.120134,
+      "iterations": 5,
+      "key_recovered": true
+    },
+    {
+      "benchmark": "substitution-frequency",
+      "input_size": 2048,
+      "median_seconds": 0.000574,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "homophonic-distribution",
+      "input_size": 2048,
+      "median_seconds": 0.000166,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "caesar-round-trip",
+      "input_size": 2048,
+      "median_seconds": 0.001568,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "vigenere-round-trip",
+      "input_size": 2048,
+      "median_seconds": 0.001857,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "substitution-round-trip",
+      "input_size": 2048,
+      "median_seconds": 0.001616,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "homophonic-round-trip",
+      "input_size": 2048,
+      "median_seconds": 0.001175,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "caesar-bruteforce",
+      "input_size": 20000,
+      "median_seconds": 0.270077,
+      "iterations": 5,
+      "key_recovered": true
+    },
+    {
+      "benchmark": "vigenere-frequency",
+      "input_size": 20000,
+      "median_seconds": 1.111079,
+      "iterations": 5,
+      "key_recovered": true
+    },
+    {
+      "benchmark": "substitution-frequency",
+      "input_size": 20000,
+      "median_seconds": 0.005606,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "homophonic-distribution",
+      "input_size": 20000,
+      "median_seconds": 0.001542,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "caesar-round-trip",
+      "input_size": 20000,
+      "median_seconds": 0.014827,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "vigenere-round-trip",
+      "input_size": 20000,
+      "median_seconds": 0.017595,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "substitution-round-trip",
+      "input_size": 20000,
+      "median_seconds": 0.015218,
+      "iterations": 5,
+      "key_recovered": null
+    },
+    {
+      "benchmark": "homophonic-round-trip",
+      "input_size": 20000,
+      "median_seconds": 0.011144,
+      "iterations": 5,
+      "key_recovered": null
+    }
+  ]
+}

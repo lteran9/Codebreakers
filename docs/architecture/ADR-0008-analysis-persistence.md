@@ -31,6 +31,18 @@ transitions (see ADR-0009). Cancellation is internal: jobs that exceed their
 time or memory budget become `cancelled`. There is no public cancel
 operation. Listing is newest-first and uses offset/limit pagination.
 
+## Alternatives considered
+
+Recorded in Phase 10.
+
+| Alternative | Why not |
+| --- | --- |
+| Keep jobs in memory only | Jobs would be lost on restart or scale-in, and separate API and worker processes could not share them. |
+| SQLite | Single-writer, file-based storage does not fit independently scaled containers on Container Apps. |
+| Cosmos DB | Optimistic concurrency via ETags would work, but the outbox needs a transaction spanning the job, its input, and the outbox row, and the local stack would need an emulator. |
+| Azure SQL Database | Viable. PostgreSQL was preferred for `FOR UPDATE SKIP LOCKED`, the open-source local image, and KEDA's `postgresql` scaler. |
+| Redis | Fast, but durability depends on configuration, and it would still need a durable store for results. |
+
 ## Consequences
 
 PostgreSQL is required for durable API deployments. A deployment must apply

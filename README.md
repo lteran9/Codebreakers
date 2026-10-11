@@ -1,248 +1,291 @@
 # Codebreakers
 
-Codebreakers is a Python project for exploring classical ciphers, historical encoded messages, and clean engineering practices. The repository is intentionally structured around a domain-first design so that cipher logic stays independent from CLI, API, and infrastructure concerns.
+A typed Python service for encrypting, decrypting, and **breaking**
+classical ciphers. One domain core powers a CLI and an HTTP API. Long-running
+cryptanalysis runs as durable background jobs, and the whole system deploys
+to Azure Container Apps with Terraform and GitHub Actions.
 
-> **Security notice:** the ciphers here provide **zero confidentiality**. They are broken by design, and this project exists to break them. Never use them to protect real secrets. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). The [threat model](docs/security/threat-model.md) covers the hosted service.
+> **Security notice:** These ciphers provide **zero confidentiality**. They
+> are broken by design, and this project exists to break them. Never use them
+> to protect real secrets. Report vulnerabilities privately as described in
+> [SECURITY.md](SECURITY.md). The [threat model](docs/security/threat-model.md)
+> covers the hosted service.
 
-## Project goals
+## What it does
 
-- Build a small, typed cipher domain with reproducible examples.
-- Keep behavior testable without framework coupling.
-- Establish quality gates before later phases expand the project.
-- Document early architectural decisions and the text-normalization policy.
+- **Four cipher families:** Caesar, monoalphabetic substitution, Vigenère, and
+  homophonic substitution, with custom alphabets and case and punctuation
+  preserved.
+- **Four keyless analyzers:**
+  - Caesar brute force, ranked by chi-square;
+  - Vigenère key-length and key recovery;
+  - substitution frequency reports;
+  - homophonic token-distribution reports.
 
-## Development setup
+  Each result includes a score and an explanation. See [domain.md](docs/domain.md)
+  for how they work and where they fail.
+- **Interfaces:** the `codebreakers` CLI, and a versioned FastAPI API with an
+  OpenAPI 3.1 contract and RFC 9457 problem details.
+- **Durable jobs:**
+  - analyses are accepted with `202`, stored in PostgreSQL with a
+    transactional outbox, and processed by separately scaled workers;
+  - workers use leases, retries, dead-lettering, and per-job time and memory
+    limits.
+- **Operations:**
+  - one container image runs every role;
+  - Terraform provisions Azure Container Apps;
+  - releases go to a zero-traffic revision, are smoke-tested, then receive
+    traffic;
+  - OpenTelemetry exports to Application Insights, and alerts have runbooks.
 
-Create and activate a virtual environment, then install the project with its development tools:
+## Demo
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e '.[dev]'
-pre-commit install
+```console
+$ codebreakers encrypt --cipher vigenere --key LEMON --text "Attack at dawn"
+Lxfopv ef rnhr
+
+$ codebreakers encrypt --cipher caesar --key 7 < examples/passage.txt \
+    | codebreakers analyze --analyzer caesar-bruteforce | jq '.candidates[0].key'
+"7"
+
+$ codebreakers encrypt --cipher vigenere --key LANTERN < examples/passage.txt \
+    | codebreakers analyze --analyzer vigenere-frequency | jq '.candidate_keys[0].key'
+"LANTERN"
 ```
 
-Common repository commands are available through the Makefile:
-
-```bash
-make install
-make format
-make lint
-make typecheck
-make test
-make coverage
+```console
+$ codebreakers serve &
+$ curl -s -X POST localhost:8000/v1/analyses -H 'Content-Type: application/json' \
+    -d '{"analyzer": "caesar-bruteforce", "text": "Wkh txlfn eurzq ira mxpsv ryhu wkh odcb grj"}'
+{"id":"599ecacc-…","status":"pending",…}
+$ curl -s localhost:8000/v1/analyses/599ecacc-…
+{"id":"599ecacc-…","status":"succeeded",…,"result":{"kind":"ranked-candidates",…,"candidates":[{"rank":1,…,"key":"3","text":"THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG",…
 ```
 
-## Quality gates
+More:
 
-Run the fast checks locally with:
+- [examples/api.sh](examples/api.sh): every endpoint with curl, including
+  errors;
+- [CLI transcript](docs/media/cli-demo.md);
+- [queued-analysis trace across services](docs/media/queued-analysis-flow.md);
+- [OpenAPI screenshot](docs/media/openapi-docs.png).
 
-```bash
-make test
-ruff check .
-ruff format --check .
-mypy src tests
+## Architecture
+
+```mermaid
+flowchart LR
+  cli["CLI"] --> app
+  client["HTTP client"] --> api["API<br/>(FastAPI)"]
+  api --> app["Application services<br/>ciphers · analysis · jobs"]
+  app --> domain["Domain<br/>Cipher / Analyzer protocols"]
+  api -- "job + outbox row<br/>(one transaction)" --> db[("PostgreSQL")]
+  relay["Relay"] -- "reads outbox" --> db
+  relay -- "publishes" --> queue[["Job queue<br/>PostgreSQL or Service Bus"]]
+  queue --> worker["Worker<br/>(child process per job)"]
+  worker -- "lease, result" --> db
+  worker --> app
 ```
 
-PostgreSQL integration tests use Testcontainers and require Docker:
+- **Clean architecture:** the domain and application layers import no
+  framework. The CLI, FastAPI, SQLAlchemy, queues, and telemetry are
+  adapters behind ports ([ADR-0002](docs/architecture/ADR-0002-clean-architecture.md),
+  [ADR-0015](docs/architecture/ADR-0015-cipher-and-analyzer-protocols.md)).
+- **Jobs:** each job moves through a small state machine with
+  optimistic-concurrency updates
+  ([ADR-0016](docs/architecture/ADR-0016-analysis-job-state-machine.md)), so
+  duplicate messages and crashed workers are safe
+  ([ADR-0009](docs/architecture/ADR-0009-async-analysis-worker.md)).
+- **Queue choice:** the queue is selected by configuration: in-process for
+  `codebreakers serve`, PostgreSQL for the local stack and Azure `dev`, or
+  Azure Service Bus (implemented and contract-tested).
+- **Azure:** the API, relay, and worker run as three Container Apps from one
+  image and scale to zero. Managed identity covers the registry, Key Vault,
+  and telemetry, and GitHub OIDC handles delivery
+  ([ADR-0012](docs/architecture/ADR-0012-azure-dev-environment.md),
+  [ADR-0017](docs/architecture/ADR-0017-workload-and-delivery-identity.md)).
+
+## Quick start
+
+Requires Python 3.12+. Docker is needed for integration tests and the local
+stack.
 
 ```bash
-make integration
+python -m venv .venv && source .venv/bin/activate
+make install                      # editable install with dev tools + pre-commit hooks
+codebreakers --help
+codebreakers serve                # http://127.0.0.1:8000/docs, in-memory, no dependencies
+examples/api.sh                   # in another shell: walk through the API with curl
 ```
 
-`make scan-source` runs Trivy over the locked requirements (fail on CRITICAL) and the working tree (fail on any secret), as CI does.
-
-## Command-line usage
-
-After installing the package, the `codebreakers` console script is available:
+To run the production-like stack (PostgreSQL, migrations, API, relay, and
+worker):
 
 ```bash
-# Encrypt with a direct --text argument
-codebreakers encrypt --cipher caesar --key 3 --text "HELLO WORLD"
-# KHOOR ZRUOG
-
-# Decrypt by piping input through standard input
-echo "KHOOR ZRUOG" | codebreakers decrypt --cipher caesar --key 3
-# HELLO WORLD
-
-# Use a custom alphabet
-codebreakers encrypt --cipher caesar --key 2 --text "1239" --alphabet "0123456789"
-# 3451
-
-# Use Vigenere
-codebreakers encrypt --cipher vigenere --key LEMON --text "ATTACK AT DAWN"
-# LXFOPV EF RNHR
-
-# Use monoalphabetic substitution
-codebreakers encrypt --cipher substitution --key QWERTYUIOPASDFGHJKLZXCVBNM --text "ATTACK"
-# QZZQEA
+docker compose up --build --wait  # or: make up
+make smoke                        # health, encrypt, submit, worker completion, result
+BASE_URL=http://127.0.0.1:8000 examples/api.sh
+docker compose down               # add -v to delete the database volume
 ```
 
-Run `codebreakers --help`, `codebreakers encrypt --help`, or `codebreakers decrypt --help` for full option details.
+Copy [.env.example](.env.example) to `.env` to change settings. Every
+variable is listed there.
 
-Analyze ciphertext without a key; the report is printed as JSON:
+> Upgrading from an older checkout? The database volume is now
+> `postgres18-data`. A leftover `codebreakers_postgres-data` volume holds
+> PostgreSQL 16 data that version 18 cannot read. Remove it with
+> `docker volume rm codebreakers_postgres-data`.
+
+## Tests and quality gates
+
+| Command | What it runs |
+| --- | --- |
+| `make test` | Unit and Hypothesis property tests |
+| `make integration` | PostgreSQL integration and migration tests (Testcontainers, needs Docker) |
+| `pytest` | Everything, with coverage (gate: 80 %; currently ~94 %) |
+| `make lint` / `ruff format --check .` | Ruff lint and format |
+| `make typecheck` | `mypy --strict` on `src` and `tests` |
+| `make scan-source` | Trivy: locked dependencies (fail on CRITICAL) and secrets |
+| `make image image-check scan sbom` | Build; non-root/no-pip policy; Trivy image scan; CycloneDX SBOM |
+| `make shutdown-check` | SIGTERM the running stack; assert clean exits |
+| `make tf-check` | Terraform fmt, validate, mock-provider tests (dev + prod), Checkov |
+| `make benchmark` | Analyzer and cipher timings ([benchmarks.md](docs/benchmarks.md)) |
+
+CI runs the same commands as five parallel gates on every push and pull
+request ([ci.yml](.github/workflows/ci.yml)). The committed API contract is
+[docs/api/openapi.json](docs/api/openapi.json). A test fails when it drifts
+from the code; regenerate it with `make openapi`.
+
+## Using the CLI and API
 
 ```bash
-codebreakers analyze --analyzer caesar-bruteforce \
-  --text "WKH TXLFN EURZQ IRA MXPSV RYHU WKH ODCB GRJ"
+codebreakers encrypt --cipher caesar --key 3 --text "HELLO WORLD"            # KHOOR ZRUOG
+echo "KHOOR ZRUOG" | codebreakers decrypt --cipher caesar --key 3            # HELLO WORLD
+codebreakers encrypt --cipher caesar --key 2 --text "1239" --alphabet "0123456789"   # 3451
+codebreakers encrypt --cipher substitution --key QWERTYUIOPASDFGHJKLZXCVBNM --text "ATTACK"  # QZZQEA
+codebreakers analyze --analyzer vigenere-frequency < ciphertext.txt          # JSON report
 ```
 
-Analyzers: `caesar-bruteforce`, `substitution-frequency`, `vigenere-frequency`, `homophonic-distribution`. Exit codes are 0 (success), 1 (unexpected error), 2 (invalid usage or unsupported language), 3 (invalid key), 4 (invalid alphabet), 5 (unsupported cipher), 6 (unsupported analyzer), and 7 (insufficient text for analysis).
+The CLI's exit codes are:
 
-## HTTP API
+| Code | Meaning |
+| --- | --- |
+| 0 | Success |
+| 1 | Unexpected error |
+| 2 | Invalid usage or unsupported language |
+| 3 | Invalid key |
+| 4 | Invalid alphabet |
+| 5 | Unsupported cipher |
+| 6 | Unsupported analyzer |
+| 7 | Insufficient text for analysis |
 
-Start the API locally (binds to `127.0.0.1:8000` by default), then open `http://127.0.0.1:8000/docs` for interactive OpenAPI documentation:
+The routes of the HTTP API are:
 
-```bash
-codebreakers serve
-```
+| Route | Purpose |
+| --- | --- |
+| `POST /v1/ciphers/{cipher}/encrypt` · `…/decrypt` | Synchronous cipher operations |
+| `POST /v1/analyses` | Submit an analysis; returns `202` with a `Location` header |
+| `GET /v1/analyses/{id}` | Poll status and result |
+| `GET /v1/analyses` | List jobs (disabled in Azure) |
+| `GET /health/live` · `/health/ready` | Probes |
 
-```bash
-# Encrypt and decrypt
-curl -s -X POST http://127.0.0.1:8000/v1/ciphers/caesar/encrypt \
-  -H 'Content-Type: application/json' \
-  -d '{"text": "HELLO WORLD", "key": "3"}'
-# {"cipher":"caesar","operation":"encrypt","result":"KHOOR ZRUOG"}
+API limits:
 
-# Submit an analysis (returns 202 with a pending job and a Location header),
-# then poll it until status is succeeded, failed, or cancelled
-curl -s -i -X POST http://127.0.0.1:8000/v1/analyses \
-  -H 'Content-Type: application/json' \
-  -d '{"analyzer": "caesar-bruteforce", "text": "WKH TXLFN EURZQ IRA MXPSV RYHU WKH ODCB GRJ"}'
-curl -s http://127.0.0.1:8000/v1/analyses/<id>
+- Request bodies are limited to 64 KiB and text to 20,000 characters.
+- Each client IP may make 120 requests and 10 submissions a minute per
+  replica; more get `429` with `Retry-After`.
+- With 100 or more unfinished jobs, new submissions get `503`.
+- Errors carry a stable `code` and the request's `correlation_id`.
 
-# Probes
-curl -s http://127.0.0.1:8000/health/live
-curl -s http://127.0.0.1:8000/health/ready
-```
+Details:
 
-Errors are RFC 9457 `application/problem+json` bodies with a machine-readable `code` and a `correlation_id` that matches the `X-Request-ID` response header. Request bodies are limited to 64 KiB, text to 20,000 characters, and keys to 4,096 characters. Analysis jobs are stored in memory by default. Set `CODEBREAKERS_DATABASE_URL` to use PostgreSQL, apply schema changes with `make migrate`, and schedule `python -m codebreakers.infrastructure.persistence.retention` daily. Results are retained for seven days by default (`CODEBREAKERS_ANALYSIS_RETENTION_DAYS`). Submitted source text is kept only until its job finishes. See [ADR-0007](docs/architecture/ADR-0007-http-api-contract.md) for the HTTP contract and [ADR-0008](docs/architecture/ADR-0008-analysis-persistence.md) for persistence and retention decisions.
+- [ADR-0007](docs/architecture/ADR-0007-http-api-contract.md): the HTTP
+  contract;
+- [operations.md](docs/operations.md#configuration): configuration;
+- [ADR-0008](docs/architecture/ADR-0008-analysis-persistence.md): retention.
+  Source text is deleted when a job finishes, and results after 7 days.
 
-### Asynchronous analysis worker
+## Deployment
 
-Analyses run outside the request. The API commits the job with a transactional outbox entry, then returns `202 Accepted`. A worker claims the job, runs the analyzer in a child process within its time and memory budget, and records the outcome. Over budget, the job becomes `cancelled`. If the analyzer rejects the input, the job becomes `failed`, with an `error_code` such as `insufficient-text`. This was built ahead of measured demand, as a portfolio demonstration. See [ADR-0009](docs/architecture/ADR-0009-async-analysis-worker.md).
+Terraform in [infra/](infra/) provisions the Azure `dev` environment in
+`westus3`:
 
-By default (`CODEBREAKERS_ANALYSIS_QUEUE=in-process`), `codebreakers serve` runs the relay and one worker thread in the same process, so no Azure resources are needed. For independently scaled processes on Azure Service Bus:
+- Container Apps for the API, relay, and worker, plus migration and
+  retention jobs;
+- PostgreSQL Flexible Server;
+- Container Registry and Key Vault;
+- Log Analytics and Application Insights;
+- alerts and a budget.
 
-```bash
-export CODEBREAKERS_ANALYSIS_QUEUE=service-bus
-export CODEBREAKERS_DATABASE_URL=postgresql://…
-export CODEBREAKERS_SERVICEBUS_CONNECTION_STRING='Endpoint=sb://…'
-export CODEBREAKERS_SERVICEBUS_QUEUE=analysis-jobs       # default
-codebreakers serve     # API: records jobs and outbox entries only
-codebreakers relay     # publishes outbox entries (safe to run several)
-codebreakers worker    # consumes jobs (scale horizontally)
-```
+Idle apps scale to zero. A public demo instance runs in `dev`. Its URL is
+intentionally not published here.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `CODEBREAKERS_ANALYSIS_TIME_BUDGET_SECONDS` | `30` | Wall-clock limit per job, including child start-up |
-| `CODEBREAKERS_ANALYSIS_MEMORY_LIMIT_MB` | `1024` | `RLIMIT_AS` for the child process where supported (`0` disables) |
-| `CODEBREAKERS_WORKER_MAX_ATTEMPTS` | `5` | Attempts before a message is dead-lettered |
-| `CODEBREAKERS_WORKER_RETRY_BASE_SECONDS` / `_MAX_SECONDS` | `2` / `60` | Exponential backoff between attempts |
-| `CODEBREAKERS_HEARTBEAT_FILE` | unset | File the worker and relay touch each loop, for container liveness probes |
+- **First deployment:** follow the [Azure runbook](docs/operations/azure-runbook.md).
+- **Releases:** a push to `master` passes the CI gates and then deploys
+  through the *Deploy to dev* job. A `v*` tag publishes a release and
+  deploys to `production` after approval
+  ([ADR-0013](docs/architecture/ADR-0013-continuous-delivery.md)). The deploy
+  job needs the GitHub `dev` environment to be connected first
+  ([runbook §4](docs/operations/azure-runbook.md#4-connect-github-actions)).
+- **Rollback, restore, alerts, cost, and teardown:** see
+  [operations.md](docs/operations.md).
 
-`CODEBREAKERS_ANALYSIS_QUEUE=postgres` runs the same API, relay, and worker topology with the queue stored in PostgreSQL instead of Service Bus. The container stack below uses it. Every variable is listed with a fake value in [.env.example](.env.example).
+Measured on `dev` (2026-10-12):
 
-A valid W3C `traceparent` header and the `X-Request-ID` correlation ID are propagated to the worker logs. To inspect, replay, or discard dead-lettered messages, use `codebreakers deadletter list | replay | discard`, as described in the [dead-letter runbook](docs/operations/dead-letter-runbook.md).
+- warm encrypt latency: p50 47 ms;
+- queued Caesar job, warm: median 2.7 s;
+- cold start: about 42 s.
 
-### Abuse limits and observability
+See [benchmarks.md](docs/benchmarks.md) for the method and caveats.
 
-The API limits each client IP, per replica, to `CODEBREAKERS_RATE_LIMIT_PER_MINUTE` requests (default 120) and `CODEBREAKERS_ANALYSIS_SUBMISSIONS_PER_MINUTE` analysis submissions (default 10). Requests over the limit get `429` with `Retry-After`. Once `CODEBREAKERS_MAX_PENDING_ANALYSES` jobs are unfinished (default 100), new submissions get `503 analysis-capacity-exceeded`. Setting any of these to `0` disables it.
+## Documentation
 
-`CODEBREAKERS_TRUSTED_PROXY_HOPS` is the number of reverse proxies whose `X-Forwarded-For` entries are trusted (default `0`; Azure sets `1`). `CODEBREAKERS_ANALYSIS_LISTING_ENABLED=false` turns off `GET /v1/analyses`, which then returns `404`. Azure sets it, so jobs are readable only by their unguessable ID.
+| Document | Contents |
+| --- | --- |
+| [docs/domain.md](docs/domain.md) | Cipher abstractions, analyzers, scoring, limitations, historical sources |
+| [docs/operations.md](docs/operations.md) | Configuration, deployment, migrations, observability, backup and restore, rollback, cost, teardown |
+| [docs/architecture/](docs/architecture/README.md) | 17 architecture decision records, indexed by topic |
+| [docs/benchmarks.md](docs/benchmarks.md) | Reproducible benchmarks and Azure measurements, with raw evidence |
+| [docs/security/threat-model.md](docs/security/threat-model.md) | Threats, controls, and known gaps |
+| [docs/operations/](docs/operations/) | Runbooks: Azure, rollback, restore, alerts, dead letters, credential compromise |
+| [docs/media/](docs/media/README.md) | CLI transcript, queued-job trace, OpenAPI screenshot |
+| [docs/portfolio.md](docs/portfolio.md) | Measured facts, architecture talk track, trade-offs, and claims not made |
+| [TODO.md](TODO.md) | The phase-by-phase implementation plan and its exit criteria |
 
-Every process logs one JSON object per line, tagged with service, environment, version, revision, and correlation and job IDs. `CODEBREAKERS_LOG_FORMAT=text` gives readable lines, and `CODEBREAKERS_LOG_LEVEL` sets the level. Logs never contain submitted text, results, or keys; a test enforces this. When Application Insights is configured, OpenTelemetry traces follow a request through the relay and the worker, and the worker exports job and queue metrics. See [ADR-0014](docs/architecture/ADR-0014-observability.md).
+## Roadmap
 
-The committed contract lives in [docs/api/openapi.json](docs/api/openapi.json). A test fails when the generated schema drifts; review the change and regenerate with `make openapi`.
+### Completed
 
-These are broken classical ciphers. They provide no confidentiality and must never be used to protect real secrets.
+| Phase | Delivered |
+| --- | --- |
+| 0 | Engineering baseline: src layout, Ruff, strict mypy, pytest, pre-commit, ADRs |
+| 1–2 | Caesar domain slice; the installable `codebreakers` CLI |
+| 3 | Substitution, Vigenère, and homophonic ciphers; four analyzers; benchmarks |
+| 4 | Versioned FastAPI API with an OpenAPI contract and problem details |
+| 5 | PostgreSQL persistence, Alembic migrations, retention |
+| 6 | Asynchronous jobs: outbox, relay, leased workers, retries, dead letters, Service Bus adapter |
+| 7 | Hardened container image, Compose stack, image policy, Trivy, SBOM |
+| 8 | Terraform for Azure Container Apps, PostgreSQL, Key Vault, and monitoring |
+| 9 | OIDC delivery with staged rollout and rollback, OpenTelemetry, alerts, runbooks, threat model |
+| 10 | This documentation, measurements, and portfolio evidence |
 
-## Containers and local stack
+### Not done yet
 
-One image runs every role: the API by default, plus `relay`, `worker`, `deadletter …`, or `alembic upgrade head` via `--entrypoint alembic`. Start a production-like local stack with a single command. It brings up PostgreSQL, a one-shot migration, the API, the relay, and the worker, and waits until every service is healthy:
+- Run the automated *Deploy to dev* job live: connect the GitHub `dev`
+  environment, then perform a live rollback drill and the alert tests.
+- Provision `prod`, and tag `v1.0`.
 
-```bash
-docker compose up --build --wait     # or: make up
-make smoke                           # health, encrypt, submit analysis, worker completion, result
-make shutdown-check                  # SIGTERM api/relay/worker; assert clean exits
-docker compose down                  # add -v to delete the database volume
-```
+### Future ideas
 
-The database volume is `postgres18-data`, mounted at `/var/lib/postgresql` as the PostgreSQL 18 image requires. A `codebreakers_postgres-data` volume left over from older versions holds PostgreSQL 16 data that version 18 cannot read. Remove it with `docker volume rm codebreakers_postgres-data` once you no longer need it.
+These are not commitments.
 
-The API listens on `http://127.0.0.1:8000`. Copy [.env.example](.env.example) to `.env` to override defaults. Containers run read-only as a non-root user with all capabilities dropped. Image checks:
+- Microsoft Entra authentication to PostgreSQL and private networking. These
+  would close the two documented least-privilege gaps.
+- Switch the deployed queue to Azure Service Bus once there is a reason to.
+- User accounts with Entra ID, and saved jobs scoped to their owner.
+- Stronger solvers: hill-climbing for substitution, and key recovery for
+  homophonic ciphers.
+- Language models beyond English.
 
-```bash
-make image          # build codebreakers:local
-make image-check    # non-root user, no pip/dev tools, no credentials in env or history
-make scan           # Trivy: fail on unreviewed CRITICAL vulnerabilities or any secret
-make sbom           # CycloneDX SBOM at build/container/sbom.cdx.json
-make lock           # regenerate hashed requirements/*.txt after dependency changes
-```
+## License
 
-`codebreakers serve --graceful-timeout N` sets how long in-flight requests may drain after SIGTERM. See [ADR-0010](docs/architecture/ADR-0010-containers-local-stack.md) for the image, queue substitute, health, and shutdown decisions.
-
-## Azure deployment
-
-Terraform in [infra/](infra/) provisions an Azure Container Apps environment in `westus3`. It runs the API, relay, and worker from the same Git-SHA-tagged image, with PostgreSQL Flexible Server, Key Vault, Application Insights, and a budget alert. Idle compute scales to zero, and identity-based access covers the registry, secrets, and telemetry. CI checks the infrastructure without Azure credentials:
-
-```bash
-make tf-check       # fmt, validate, terraform test (mock providers, dev + prod), Checkov
-```
-
-For the first deployment, follow the runbook to bootstrap state and create the registry. With Docker Desktop running, build and push locally without ACR Tasks, then review and apply the plan:
-
-```bash
-make tf-init TF_STATE_ACCOUNT=<bootstrap output>
-ACR=$(terraform -chdir=infra/azure output -raw container_registry_name)
-ACR_HOST=$(terraform -chdir=infra/azure output -raw container_registry_login_server)
-az acr login --name "$ACR"
-docker buildx build \
-  --platform linux/amd64 \
-  --tag "$ACR_HOST/codebreakers:$(git rev-parse HEAD)" \
-  --push .
-make tf-plan        # saved plan: review it
-make tf-apply       # applies exactly the saved plan
-make azure-migrate  # alembic upgrade head as a Container Apps job
-make azure-smoke    # smoke test against the public HTTPS URL
-```
-
-Commit intended source changes before building, and keep the same commit checked out through the plan so the image tag matches. `make azure-image` is an optional Azure-side build alternative only when the subscription supports ACR Tasks.
-
-After the first deployment, GitHub Actions releases the application ([ADR-0013](docs/architecture/ADR-0013-continuous-delivery.md)):
-
-- A push to `master` runs CI, pushes the tested image with a provenance attestation, and runs migrations. It then creates a new API revision with no traffic, smoke-tests it, and shifts traffic to it.
-- A `v*` tag publishes a GitHub release with the image, SBOM, and attestations, then deploys to `production` after approval.
-- Workflows sign in to Azure through OIDC, with one identity per GitHub environment, and no stored secrets.
-- Terraform owns the infrastructure but ignores images and traffic.
-- `make azure-deploy IMAGE_TAG=<sha>` and `make azure-rollback [ROLLBACK_TO=<revision>]` run the same scripts from a workstation.
-
-Operational alerts (API 5xx responses, restarts, database saturation, dead letters, queue age) email the budget contacts. Each links to the [alerts runbook](docs/operations/alerts.md). Further runbooks cover [rollback](docs/operations/rollback-runbook.md), [database restore](docs/operations/database-restore-runbook.md), and [credential compromise](docs/operations/credential-compromise-runbook.md).
-
-Follow the [Azure runbook](docs/operations/azure-runbook.md) for the one-time state bootstrap, first deployment, connecting GitHub Actions, scaling checks, and teardown. [ADR-0011](docs/architecture/ADR-0011-terraform.md) covers Terraform and state. [ADR-0012](docs/architecture/ADR-0012-azure-dev-environment.md) covers the deployment diagram, trust boundaries, cost, identities, and the documented substitutions: the PostgreSQL queue instead of Service Bus, and password database auth.
-
-### Terraform security scanning with Checkov
-
-[Checkov](https://www.checkov.io/) is a static analysis tool for infrastructure-as-code. It inspects the Terraform files under `infra/` against security and configuration policies, such as whether resources enable encryption, restrict access, and avoid insecure defaults. It does not deploy resources or require Azure credentials.
-
-`make tf-check` runs Checkov after Terraform formatting, validation, and mock-provider tests. The scan runs in a Docker image pinned to a version and digest, so CI uses the same scanner build each time. A failed policy check fails the target. When a deliberate design choice triggers a check, the relevant Terraform resource documents an inline `#checkov:skip=<id>:<reason>` exception for reviewers to assess.
-
-## Cryptanalysis and benchmarks
-
-Phase 3 adds reusable text statistics, Caesar brute-force ranking, substitution frequency-analysis assistance, Vigenere key-length and candidate ranking, and homophonic token-distribution reports. Analyzer outputs include explicit language or model versions and explainable scores or measurements.
-
-Run the deterministic benchmark script with:
-
-```bash
-python scripts/benchmark_caesar.py
-```
-
-The current quality target is that the Caesar brute-force analyzer places the documented Caesar fixture's key in the top-ranked candidate. Vigenere analysis reports ranked key lengths and candidate keys for sufficiently long ciphertext, but short inputs may not contain enough repeated structure for reliable recovery. Substitution and homophonic analysis are assistance/reporting features in this phase and do not claim to automatically solve arbitrary ciphertext.
-
-The package source lives in `src/codebreakers`, and tests live in `tests`.
-
-## Architecture notes
-
-The engineering baseline includes a lightweight ADR set under `docs/architecture/` to make the repository's layout and decisions explicit. This helps future phases avoid accidental framework leakage and inconsistent data-handling choices.
+[MIT](LICENSE)
