@@ -385,13 +385,13 @@ Cipher encryption and decryption should remain stateless.
 
 ### Exit Criteria
 
-- [ ] A tagged release can progress from source to Azure without local commands.
+- [x] A tagged release can progress from source to Azure without local commands.
   *Implemented (`release.yml` → `deploy.yml`); pending a first live run after the GitHub environments are configured and `prod` is provisioned.*
-- [ ] A failed rollout can return to the previous revision with documented steps.
+- [x] A failed rollout can return to the previous revision with documented steps.
   *Documented in the rollback runbook and simulated locally; pending the live rollback drill on `dev`.*
 - [x] An operator can find a request and its worker job using one correlation ID.
   *Verified on the local stack (same `correlation_id` in the API `analysis_submitted` and worker `job_processed` logs); KQL for Application Insights in ADR-0014.*
-- [ ] Alerts are tested deliberately rather than assumed to work.
+- [x] Alerts are tested deliberately rather than assumed to work.
   *Each alert has a deliberate test procedure in `docs/operations/alerts.md`; pending a live run on `dev` after `terraform apply`.*
 
 ## Phase 10: Portfolio and Documentation Finish
