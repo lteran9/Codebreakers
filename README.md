@@ -22,8 +22,7 @@ to Azure Container Apps with Terraform and GitHub Actions.
   - substitution frequency reports;
   - homophonic token-distribution reports.
 
-  Each result includes a score and an explanation. See [domain.md](docs/domain.md)
-  for how they work and where they fail.
+  Ranked candidates include scores and explanations; frequency reports include counts, frequencies, comparisons, and notes. See [domain.md](docs/domain.md) for how they work and where they fail.
 - **Interfaces:** the `codebreakers` CLI, and a versioned FastAPI API with an
   OpenAPI 3.1 contract and RFC 9457 problem details.
 - **Durable jobs:**
