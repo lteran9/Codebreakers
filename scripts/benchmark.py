@@ -19,6 +19,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from random import Random
 
+from codebreakers.composition import ANALYZER_REGISTRY
 from codebreakers.domain.ciphers.caesar import CaesarCipher
 from codebreakers.domain.ciphers.homophonic import (
     HomophonicKey,
@@ -31,10 +32,9 @@ from codebreakers.domain.ciphers.substitution import (
 from codebreakers.domain.ciphers.vigenere import VigenereCipher, VigenereKey
 from codebreakers.domain.cryptanalysis.analyzers import (
     CaesarBruteForceAnalyzer,
-    HomophonicDistributionAnalyzer,
-    SubstitutionFrequencyAnalyzer,
     VigenereAnalyzer,
 )
+from codebreakers.domain.cryptanalysis.statistics import ENGLISH_LANGUAGE_MODEL
 from codebreakers.domain.models import Alphabet, CaseStrategy, TransformOptions
 from codebreakers.domain.protocols import Cipher
 
@@ -134,20 +134,24 @@ def _benchmarks_for_size(
             cipher.encrypt(plaintext, key, options), key, options
         )
 
+    analyzer_inputs = {
+        "caesar-bruteforce": caesar_text,
+        "vigenere-frequency": vigenere_text,
+        "substitution-frequency": substitution_text,
+        "homophonic-distribution": homophonic_text,
+    }
     operations: dict[str, Callable[[], object]] = {
-        "caesar-bruteforce": lambda: CaesarBruteForceAnalyzer().analyze(caesar_text),
-        "vigenere-frequency": lambda: VigenereAnalyzer().analyze(vigenere_text),
-        "substitution-frequency": lambda: SubstitutionFrequencyAnalyzer().analyze(
-            substitution_text
-        ),
-        "homophonic-distribution": lambda: HomophonicDistributionAnalyzer().analyze(
-            homophonic_text
-        ),
+        name: lambda factory=factory, text=analyzer_inputs.get(
+            name, caesar_text
+        ): factory(ENGLISH_LANGUAGE_MODEL).analyze(text)
+        for name, factory in ANALYZER_REGISTRY.items()
+    }
+    operations.update({
         "caesar-round-trip": round_trip(caesar, CAESAR_SHIFT),
         "vigenere-round-trip": round_trip(vigenere, vigenere_key),
         "substitution-round-trip": round_trip(substitution, substitution_key),
         "homophonic-round-trip": round_trip(homophonic, homophonic_key),
-    }
+    })
     return operations, recovered
 
 
