@@ -48,7 +48,9 @@ The same package (and the same container image) runs every role:
 codebreakers serve --graceful-timeout 10   # API: stores jobs and outbox rows
 codebreakers relay                         # publishes outbox rows to the queue (safe to run several)
 codebreakers worker                        # claims and runs jobs (scale horizontally)
-codebreakers deadletter list|replay|discard
+codebreakers deadletter list       # inspect metadata
+codebreakers deadletter replay     # replay selected messages
+codebreakers deadletter discard    # discard selected messages
 alembic upgrade head                       # migrations (image: --entrypoint alembic)
 python -m codebreakers.infrastructure.persistence.retention   # daily purge
 ```
