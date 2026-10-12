@@ -1,7 +1,8 @@
 .PHONY: install format lint typecheck test integration coverage openapi serve worker relay migrate \
+	benchmark measure \
 	lock image image-check up down smoke shutdown-check scan sbom scan-source \
 	tf-fmt tf-validate tf-test tf-scan tf-check tf-init tf-plan tf-apply \
-	azure-image azure-migrate azure-smoke azure-deploy azure-rollback
+	azure-image azure-migrate azure-smoke azure-measure azure-deploy azure-rollback
 
 install:
 	python -m pip install --upgrade pip
@@ -28,6 +29,12 @@ coverage:
 
 openapi:
 	python -c "from codebreakers.api.openapi import render_openapi_document as r; print(r(), end='')" > docs/api/openapi.json
+
+benchmark:
+	python scripts/benchmark.py
+
+measure:
+	python scripts/measure_api.py
 
 serve:
 	codebreakers serve
@@ -177,6 +184,9 @@ azure-migrate:
 
 azure-smoke:
 	python scripts/smoke_test.py --base-url $$($(TF_OUTPUT) api_url) --timeout 300
+
+azure-measure:
+	python scripts/measure_api.py --base-url $$($(TF_OUTPUT) api_url) --timeout 300
 
 # The same staged rollout and rollback that GitHub Actions runs (ADR-0013),
 # reading resource names from the Terraform output.

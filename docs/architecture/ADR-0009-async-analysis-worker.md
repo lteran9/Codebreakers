@@ -135,6 +135,19 @@ Service Bus is reached with `CODEBREAKERS_SERVICEBUS_CONNECTION_STRING` and
 `CODEBREAKERS_SERVICEBUS_QUEUE` (default `analysis-jobs`). Managed identity
 replaces the connection string when Azure infrastructure arrives (Phase 8).
 
+## Alternatives considered
+
+Recorded in Phase 10.
+
+| Alternative | Why not |
+| --- | --- |
+| Run analyses synchronously in the request (status quo before this phase) | Adequate for today's analyzers (about 1.2 s at the text cap), and still the honest baseline. Rejected only to demonstrate durable asynchronous processing for future slow solvers (see Context). |
+| Publish to the broker directly from the request (no outbox) | A broker outage between the database commit and the publish would leave a `pending` job that never runs. |
+| Azure Storage Queues | Cheaper and simpler, but no native dead-letter queue, scheduled delivery, or lock renewal. Each would have to be rebuilt in the application. |
+| Celery with Redis or RabbitMQ | Adds a broker to operate and a framework that owns retries and serialization. Explicit ports keep those behaviours visible and contract-tested. |
+| Azure Event Grid or Event Hubs | Built for event fan-out and streaming, not competing consumers with per-message settlement. |
+| PostgreSQL as the queue everywhere | Adopted for the local stack and Azure `dev` ([ADR-0010](ADR-0010-containers-local-stack.md), [ADR-0012](ADR-0012-azure-dev-environment.md)). Service Bus remains the target for independent broker scaling. |
+
 ## Consequences
 
 - Submission latency no longer depends on analyzer runtime, and workers scale

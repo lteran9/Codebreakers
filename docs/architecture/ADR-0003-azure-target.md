@@ -17,6 +17,17 @@ The initial production target will be Azure Container Apps with PostgreSQL Flexi
 - The project explicitly treats Azure as a deployment target rather than a domain dependency.
 - Local development remains independent and can be run without cloud dependencies.
 
+## Alternatives considered
+
+Recorded in Phase 10.
+
+| Alternative | Why not |
+| --- | --- |
+| Azure Kubernetes Service | Gives full control, but the cluster, node pools, ingress, and upgrades are a standing operational and cost burden for three small processes. Container Apps runs KEDA and Envoy for us. |
+| Azure App Service | Suits the API but has no first-class scale-to-zero or event-driven scaling for background workers. The worker would need a separate product. |
+| Azure Functions | The analyzer runs in a budgeted child process for up to 30 s, and the project ships one container image. A Functions host would change the programming model for the worker only. |
+| Cosmos DB or Azure SQL | See [ADR-0008](ADR-0008-analysis-persistence.md). PostgreSQL also serves as the local queue substitute ([ADR-0010](ADR-0010-containers-local-stack.md)). |
+
 ## Amendment (Phase 8)
 
 [ADR-0012](ADR-0012-azure-dev-environment.md) deploys this target with
