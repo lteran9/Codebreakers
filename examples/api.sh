@@ -50,7 +50,7 @@ echo "Location: $location"
 step "Poll until the job finishes"
 job=""
 for _ in $(seq 1 60); do
-  job="$(curl --silent --show-error "$BASE_URL$location")"
+  job="$(curl --silent --show-error -H "X-Request-ID: $REQUEST_ID" "$BASE_URL$location")"
   case "$job" in
     *'"status":"pending"'* | *'"status":"running"'*) sleep 1 ;;
     *) break ;;
