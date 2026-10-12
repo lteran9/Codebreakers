@@ -141,17 +141,19 @@ def _benchmarks_for_size(
         "homophonic-distribution": homophonic_text,
     }
     operations: dict[str, Callable[[], object]] = {
-        name: lambda factory=factory, text=analyzer_inputs.get(
-            name, caesar_text
-        ): factory(ENGLISH_LANGUAGE_MODEL).analyze(text)
+        name: lambda factory=factory, name=name: factory(
+            ENGLISH_LANGUAGE_MODEL
+        ).analyze(analyzer_inputs.get(name, caesar_text))
         for name, factory in ANALYZER_REGISTRY.items()
     }
-    operations.update({
-        "caesar-round-trip": round_trip(caesar, CAESAR_SHIFT),
-        "vigenere-round-trip": round_trip(vigenere, vigenere_key),
-        "substitution-round-trip": round_trip(substitution, substitution_key),
-        "homophonic-round-trip": round_trip(homophonic, homophonic_key),
-    })
+    operations.update(
+        {
+            "caesar-round-trip": round_trip(caesar, CAESAR_SHIFT),
+            "vigenere-round-trip": round_trip(vigenere, vigenere_key),
+            "substitution-round-trip": round_trip(substitution, substitution_key),
+            "homophonic-round-trip": round_trip(homophonic, homophonic_key),
+        }
+    )
     return operations, recovered
 
 
